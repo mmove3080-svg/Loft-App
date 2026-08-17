@@ -185,6 +185,209 @@ body.app-open #stage{transform:scale(.94);opacity:0;pointer-events:none}
 #homebar{flex:0 0 auto;height:var(--homebar,26px);display:flex;align-items:center;justify-content:center}
 #homebar i{display:block;width:min(calc(var(--sw)*.35),168px);height:5px;border-radius:3px;background:rgba(255,255,255,.9)}
 
+/* ======================= theme surfaces (light default) ================== */
+:root{
+  --pg:#f4f4f6; --card:#fff; --ink:#0d1b2a; --ink2:#4a5763; --ink3:#8a94a0;
+  --line:rgba(0,0,0,.08); --gold:#b8892b; --navy:#12263f;
+}
+body.dark{
+  --pg:#000; --card:#1c1c1e; --ink:#fff; --ink2:rgba(235,235,245,.62); --ink3:rgba(235,235,245,.32);
+  --line:rgba(255,255,255,.11); --gold:#d8a33f; --navy:#dfe6ee;
+}
+#dim{position:fixed;inset:0;z-index:9000;background:#000;opacity:0;pointer-events:none;transition:opacity .18s linear}
+
+/* ============================== article ================================= */
+#article{
+  position:fixed;inset:0;z-index:40;background:var(--pg);color:var(--ink);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  transition:opacity .34s var(--ease),transform .34s var(--ease);
+}
+#article[hidden]{display:none}
+#article.leaving{opacity:0;transform:scale(.97)}
+.art{max-width:1040px;margin:0 auto;padding:0 clamp(14px,3.4vw,26px) 40px}
+.art-hero{display:grid;grid-template-columns:minmax(0,1fr);gap:6px;padding:clamp(22px,5vw,40px) 0 clamp(16px,3vw,26px);text-align:center}
+.art-hero h1{
+  margin:0;font-size:clamp(30px,7.4vw,62px);line-height:.98;font-weight:800;
+  letter-spacing:-.02em;color:var(--navy);text-transform:uppercase;
+}
+.art-hero h2{
+  margin:6px 0 0;font-size:clamp(12px,2.6vw,22px);font-weight:700;color:var(--gold);
+  letter-spacing:.16em;text-transform:uppercase;
+}
+.art-hero p{margin:14px auto 0;max-width:62ch;font-size:clamp(13px,2.5vw,16px);line-height:1.5;color:var(--ink2)}
+.art-hero .por{
+  width:clamp(74px,17vw,132px);aspect-ratio:1;border-radius:50%;margin:0 auto 4px;
+  background:linear-gradient(150deg,#1c3f6e,#0d1b2a);position:relative;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 10px 26px rgba(13,27,42,.28);
+}
+.art-hero .por span{font-size:clamp(22px,5vw,38px);font-weight:800;color:#fff;letter-spacing:-.02em}
+.art-hero .por img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+
+/* timeline */
+.tl{position:relative;padding-left:clamp(26px,6vw,46px)}
+.tl::before{
+  content:"";position:absolute;left:clamp(9px,2.2vw,17px);top:18px;bottom:22px;width:2px;
+  background:repeating-linear-gradient(var(--line) 0 6px,transparent 6px 12px);
+}
+.tl-item{position:relative;margin-bottom:clamp(10px,2vw,14px)}
+.tl-dot{
+  position:absolute;left:calc(clamp(26px,6vw,46px) * -1);top:clamp(14px,3vw,24px);
+  width:clamp(20px,4.4vw,30px);height:clamp(20px,4.4vw,30px);border-radius:50%;
+  background:var(--navy);color:var(--card);display:flex;align-items:center;justify-content:center;
+  font-size:clamp(10px,2.2vw,14px);font-weight:700;z-index:1;
+  transform:translateX(calc(clamp(20px,4.4vw,30px) / -2 + clamp(10px,2.2vw,18px)));
+}
+.tl-card{
+  display:grid;grid-template-columns:clamp(78px,20vw,150px) minmax(0,1fr);
+  gap:clamp(10px,2.4vw,18px);align-items:stretch;
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:clamp(8px,1.6vw,12px);box-shadow:0 1px 3px rgba(0,0,0,.05);
+  transition:box-shadow .2s,transform .2s var(--ease);
+}
+.tl-img{
+  position:relative;border-radius:9px;overflow:hidden;min-height:clamp(84px,22vw,150px);
+  background:linear-gradient(155deg,var(--c1),var(--c2));
+  display:flex;align-items:center;justify-content:center;
+}
+.tl-img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 22%}
+.tl-img .mono{font-size:clamp(20px,5vw,34px);font-weight:800;color:rgba(255,255,255,.5);letter-spacing:-.02em}
+.tl-body{display:flex;flex-direction:column;gap:clamp(5px,1vw,7px);min-width:0;padding:clamp(3px,1vw,6px) clamp(2px,1vw,6px) clamp(3px,1vw,6px) 0}
+.tl-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.crest{
+  width:clamp(26px,6.4vw,44px);height:clamp(26px,6.4vw,44px);flex:0 0 auto;border-radius:8px 8px 14px 14px;
+  background:linear-gradient(160deg,var(--c1),var(--c2));
+  display:flex;align-items:center;justify-content:center;
+  font-size:clamp(9px,2.1vw,13px);font-weight:800;color:#fff;letter-spacing:-.01em;
+  box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.35);
+}
+.tl-club{font-size:clamp(14px,3.4vw,23px);font-weight:800;letter-spacing:-.01em;text-transform:uppercase;color:var(--club,var(--navy))}
+.tl-years{
+  font-size:clamp(9px,2vw,12.5px);font-weight:700;color:#fff;background:var(--club,var(--navy));
+  padding:3px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.02em;
+}
+.tl-text{margin:0;font-size:clamp(11.5px,2.5vw,15px);line-height:1.45;color:var(--ink2)}
+.tl-stats{display:flex;flex-wrap:wrap;align-items:center;gap:clamp(6px,1.6vw,10px);margin-top:auto;padding-top:3px}
+.tl-stat{display:flex;align-items:center;gap:5px;font-size:clamp(10.5px,2.2vw,13.5px);font-weight:600;color:var(--ink)}
+.tl-stat svg{width:clamp(12px,2.8vw,17px);height:clamp(12px,2.8vw,17px);flex:0 0 auto}
+.tl-stat+.tl-stat::before{content:"";width:1px;height:14px;background:var(--line);margin-right:clamp(1px,1vw,5px)}
+
+/* footer stat strip */
+.art-foot{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:clamp(10px,2.4vw,20px);
+  background:var(--card);border:1px solid var(--line);border-radius:14px;
+  padding:clamp(12px,2.6vw,20px);margin-top:clamp(10px,2vw,16px);
+}
+.fs{display:flex;gap:10px;align-items:flex-start}
+.fs svg{width:clamp(24px,5vw,34px);height:clamp(24px,5vw,34px);flex:0 0 auto}
+.fs .k{font-size:clamp(9px,1.9vw,11px);font-weight:700;letter-spacing:.09em;color:var(--ink3);text-transform:uppercase}
+.fs .v{font-size:clamp(20px,4.4vw,30px);font-weight:800;line-height:1.05;letter-spacing:-.02em;color:var(--ink)}
+.fs .n{font-size:clamp(10px,2vw,12px);color:var(--ink2);line-height:1.35;margin-top:2px}
+.art-note{text-align:center;font-size:clamp(9.5px,1.9vw,11.5px);color:var(--ink3);line-height:1.5;padding:16px 4px 0}
+
+/* ============================== lock screen ============================= */
+#lock{
+  position:fixed;inset:0;z-index:60;background:var(--pg);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;padding:24px;
+  opacity:0;transition:opacity .26s var(--ease);
+}
+#lock[hidden]{display:none}
+#lock.on{opacity:1}
+.lockbox{width:100%;max-width:360px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:18px}
+.lockbox h2{margin:0;font-size:clamp(19px,4.6vw,26px);font-weight:700;letter-spacing:-.02em;line-height:1.25;color:var(--ink)}
+.lockbox input{
+  width:100%;text-align:center;font-size:24px;letter-spacing:.32em;font-weight:600;
+  padding:14px 12px;border-radius:14px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);outline:none;font-variant-numeric:tabular-nums;
+}
+.lockbox input:focus{border-color:#0a84ff;box-shadow:0 0 0 3px rgba(10,132,255,.18)}
+.lockbox button{
+  width:100%;padding:13px;border-radius:14px;background:#0a84ff;color:#fff;
+  font-size:17px;font-weight:600;
+}
+.lockbox button:active{filter:brightness(.86)}
+.lockbox button[disabled]{opacity:.45}
+.lockbox .back{background:none;color:var(--ink3);font-size:14px;font-weight:500;padding:2px}
+.shake{animation:shk .34s}
+@keyframes shk{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-7px)}40%,60%{transform:translateX(7px)}}
+
+/* ============================== settings ================================ */
+.settings{background:var(--pg);color:var(--ink)}
+.settings .nav{background:var(--card);border-bottom:1px solid var(--line);color:var(--ink)}
+.settings .scroll{background:var(--pg)}
+.set-title{font-size:clamp(28px,7vw,34px);font-weight:800;letter-spacing:-.025em;padding:8px 18px 14px;color:var(--ink)}
+.set-grp{font-size:12px;font-weight:600;letter-spacing:.06em;color:var(--ink3);text-transform:uppercase;padding:16px 20px 7px}
+.set-card{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line);overflow:hidden}
+@media (min-width:520px){.set-card{margin:0 16px;border-radius:12px;border:1px solid var(--line)}}
+.set-row{display:flex;align-items:center;gap:12px;padding:12px 16px;width:100%;text-align:left;min-height:52px}
+.set-row+.set-row{border-top:1px solid var(--line)}
+.set-row .ic{width:26px;height:26px;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+.set-row .ic svg{width:23px;height:23px}
+.set-row .lb{flex:1;font-size:16.5px;color:var(--ink);min-width:0}
+.set-row .val{font-size:16px;color:var(--ink3);flex:0 0 auto}
+.set-row .act{font-size:16px;color:#0a84ff;flex:0 0 auto;font-weight:500}
+.set-row .act.danger{color:#ff3b30}
+button.set-row:active{background:rgba(120,120,128,.12)}
+.set-foot{font-size:12.5px;line-height:1.45;color:var(--ink3);padding:10px 20px 22px}
+.sw{width:51px;height:31px;border-radius:16px;background:rgba(120,120,128,.24);position:relative;flex:0 0 auto;transition:background .22s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.28);transition:transform .22s var(--ease)}
+.sw.on{background:#34c759}
+.sw.on::after{transform:translateX(20px)}
+.slider{flex:1;min-width:90px;display:flex;align-items:center}
+.slider input{width:100%;-webkit-appearance:none;appearance:none;height:5px;border-radius:3px;background:rgba(120,120,128,.28);outline:none}
+.slider input::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);cursor:pointer}
+.slider input::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.35);cursor:pointer}
+.slider input::-webkit-slider-runnable-track{height:5px;border-radius:3px;background:linear-gradient(90deg,#0a84ff var(--pct,100%),rgba(120,120,128,.28) var(--pct,100%))}
+
+/* modal sheet used by settings dialogs */
+.sheet{position:absolute;inset:0;z-index:7;background:var(--pg);display:flex;flex-direction:column;color:var(--ink)}
+.sheet .nav{background:var(--card);color:var(--ink);border-bottom:1px solid var(--line)}
+.sheet .form{padding:18px 18px 8px;display:flex;flex-direction:column;gap:10px}
+.sheet .form input{
+  width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink);font-size:17px;outline:none;letter-spacing:.16em;text-align:center;
+}
+.sheet .form input:focus{border-color:#0a84ff}
+.sheet .hint{font-size:13px;color:var(--ink3);line-height:1.45;padding:2px 2px 0;text-align:center;letter-spacing:0}
+.sheet .err{font-size:13.5px;color:#ff3b30;text-align:center;min-height:18px;letter-spacing:0}
+.sheet .go{margin:8px 0 0;padding:13px;border-radius:13px;background:#0a84ff;color:#fff;font-size:17px;font-weight:600}
+.sheet .go[disabled]{opacity:.4}
+.sheet .go.danger{background:#ff3b30}
+
+/* ============================== calculator ============================== */
+.calculator{background:#000;color:#fff}
+.calculator{--pad:#333;--padtxt:#fff;--top:#a5a5a5;--toptxt:#000;--op:#ff9f0a}
+.calc-out{
+  flex:0 0 auto;padding:14px 20px 10px;text-align:right;font-weight:300;
+  font-size:clamp(46px,15vw,76px);line-height:1.05;letter-spacing:-.02em;
+  overflow:hidden;white-space:nowrap;font-variant-numeric:tabular-nums;min-height:1.15em;
+}
+.calc-keys{
+  flex:0 0 auto;display:grid;gap:clamp(8px,2.4vw,13px);
+  grid-template-columns:repeat(4,1fr);padding:0 clamp(10px,3.4vw,18px) clamp(10px,3vw,16px);
+}
+.ck{
+  aspect-ratio:1;border-radius:999px;background:var(--pad);color:var(--padtxt);
+  font-size:clamp(22px,7vw,34px);font-weight:400;display:flex;align-items:center;justify-content:center;
+  transition:filter .12s;
+}
+.ck:active{filter:brightness(1.5)}
+.ck.top{background:var(--top);color:var(--toptxt);font-weight:500}
+.ck.op{background:var(--op);color:#fff;font-size:clamp(26px,8vw,40px)}
+.ck.op.armed{background:#fff;color:var(--op)}
+.ck.zero{aspect-ratio:auto;grid-column:span 2;justify-content:flex-start;padding-left:9%}
+.calc-wrap{flex:1;display:flex;flex-direction:column;justify-content:flex-end;min-height:0;max-width:520px;margin:0 auto;width:100%}
+
+/* home-screen app icons living inside the widget grid */
+.gridapps{display:flex;align-items:flex-start;gap:var(--gap);padding-top:2px}
+.gicon{display:flex;flex-direction:column;align-items:center;gap:5px;width:var(--colw)}
+.gicon .appicon{width:var(--colw);height:var(--colw)}
+.gicon:active .appicon{transform:scale(.9);opacity:.85}
+.gicon .lab{
+  font-size:clamp(9px,calc(var(--colw)*.175),13px);font-weight:400;color:#fff;
+  text-shadow:0 1px 3px rgba(0,0,0,.6);white-space:nowrap;letter-spacing:.01em;
+}
+
 /* ============================ app layer ============================ */
 #applayer{position:fixed;inset:0;z-index:20;pointer-events:none}
 .appwin{
@@ -374,33 +577,14 @@ body.app-open #stage{transform:scale(.94);opacity:0;pointer-events:none}
 
     <div id="springboard">
       <div id="grid">
-        <!-- Weather -->
-        <div class="widget w-med" id="w-weather" role="img" aria-label="Weather, Lagos, 29 degrees, partly cloudy">
-          <svg class="sky" viewBox="0 0 200 96" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <filter id="wxCloud" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-                <feTurbulence type="fractalNoise" baseFrequency="0.019 0.042" numOctaves="5" seed="17" result="n"/>
-                <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  1.9 0 0 0 -0.72"/>
-                <feGaussianBlur stdDeviation=".7"/>
-              </filter>
-              <radialGradient id="wxCore" cx=".72" cy=".36" r=".47">
-                <stop offset="0" stop-color="#fff"/>
-                <stop offset=".55" stop-color="#fff" stop-opacity=".85"/>
-                <stop offset="1" stop-color="#fff" stop-opacity="0"/>
-              </radialGradient>
-              <mask id="wxM" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="96">
-                <rect width="200" height="96" fill="url(#wxCore)"/>
-              </mask>
-            </defs>
-            <g mask="url(#wxM)"><rect width="200" height="96" filter="url(#wxCloud)"/></g>
-          </svg>
-          <div class="veil"></div>
-          <div class="wx">
-            <div class="city">Lagos</div>
-            <div class="temp">29°</div>
-            <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><g stroke="#ffcc00" stroke-width="1.9" stroke-linecap="round"><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></g><circle cx="12" cy="12" r="4.1" fill="#ffcc00"/></svg>
-            <div class="cond">Partly cloudy</div>
-          </div>
+        <!-- Calculator + Settings (this row replaced the Weather widget) -->
+        <div class="gridapps" id="w-apps">
+          <button class="gicon" data-open="calculator" aria-label="Open Calculator">
+            <span class="appicon" id="ico-calc"></span><span class="lab">Calculator</span>
+          </button>
+          <button class="gicon" data-open="settings" aria-label="Open Settings">
+            <span class="appicon" id="ico-set"></span><span class="lab">Settings</span>
+          </button>
         </div>
 
         <!-- Clock -->
@@ -455,6 +639,9 @@ body.app-open #stage{transform:scale(.94);opacity:0;pointer-events:none}
   </div>
 </div>
 
+<div id="article" hidden></div>
+<div id="lock" hidden></div>
+<div id="dim" aria-hidden="true"></div>
 <div id="applayer"></div>
 <input type="file" id="filepicker" multiple accept="image/*,video/*,.heic,.heif,.mov" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true">
 
@@ -638,7 +825,7 @@ function layout(){
   LAYOUT.landscape=land; LAYOUT.sw=sw;
 }
 function placeWidgets(mode){
-  var w=$('#w-weather'),c=$('#w-clock'),cal=$('#w-cal'),b=$('#w-batt'),p=$('#w-photos');
+  var w=$('#w-apps'),c=$('#w-clock'),cal=$('#w-cal'),b=$('#w-batt'),p=$('#w-photos');
   function set(n,cs,ce,rs,re){ n.style.gridColumn=cs+' / '+ce; n.style.gridRow=rs+' / '+re; }
   if(mode==='band'){
     // one horizontal band, reference reading order
@@ -873,7 +1060,8 @@ document.addEventListener('keydown',function(e){
   if(t&&t.tagName!=='BUTTON'){ e.preventDefault(); openApp(t.getAttribute('data-open'),t) }
 });
 
-var REG={}; // app registry, filled below
+var REG={};        // app registry, filled below
+var SCREEN='article'; // 'article' | 'lock' | 'home'
 
 /* ------------------------------- boot ------------------------------------ */
 layout(); buildCalendar(); startClock(); renderPhotosWidget(null);
@@ -884,13 +1072,14 @@ setInterval(buildCalendar,60*60*1000);
 
 // keep the springboard from rubber-banding on iOS
 document.addEventListener('touchmove',function(e){
+  if(SCREEN!=='home')return;
   if(!current&&e.touches.length===1&&!e.target.closest('.scroll,.bubbles,textarea,input'))e.preventDefault();
 },{passive:false});
 
 // swipe up from the bottom edge closes an app
 var tsY=null,tsX=null;
 document.addEventListener('touchstart',function(e){
-  if(!current)return; var t=e.touches[0];
+  if(!current||SCREEN!=='home')return; var t=e.touches[0];
   if(t.clientY>innerHeight-34){tsY=t.clientY;tsX=t.clientX}else tsY=null;
 },{passive:true});
 document.addEventListener('touchend',function(e){
@@ -1698,6 +1887,634 @@ DB.get('kv','seeded').then(function(v){
   DB.put('chats',chat);
   DB.put('notes',{id:uid(),createdAt:now,updatedAt:now,
     text:'Welcome\nThis note lives in your browser. Edit it, delete it, or write a new one — everything stays on this device.'});
+});
+
+/* ==========================================================================
+   Screens: article -> (optional passcode) -> home
+   ========================================================================== */
+
+/* ------------------------------ preferences ------------------------------ */
+var PREF={dark:false,brightness:1};
+function safeSession(){
+  try{ sessionStorage.setItem('__t','1'); sessionStorage.removeItem('__t'); return sessionStorage }
+  catch(e){ var m={}; return {getItem:function(k){return m[k]||null},setItem:function(k,v){m[k]=v},removeItem:function(k){delete m[k]}} }
+}
+var SESSION=safeSession();
+
+function applyPrefs(){
+  document.body.classList.toggle('dark',!!PREF.dark);
+  var d=$('#dim'); if(d)d.style.opacity=String(clamp(1-PREF.brightness,0,.62));
+  var tc=document.querySelector('meta[name=theme-color]');
+  if(tc)tc.setAttribute('content',PREF.dark?'#000000':'#0b0f14');
+}
+function savePrefs(){ DB.put('kv',{dark:PREF.dark,brightness:PREF.brightness},'prefs') }
+function loadPrefs(){
+  return DB.get('kv','prefs').then(function(p){
+    if(p&&typeof p==='object'){
+      PREF.dark=!!p.dark;
+      PREF.brightness=typeof p.brightness==='number'?clamp(p.brightness,.38,1):1;
+    }
+    applyPrefs();
+  });
+}
+
+/* ------------------------------- passcode -------------------------------- */
+/* Stored as a PBKDF2-SHA256 hash with a random salt — never plaintext, never
+   logged. This is a privacy screen for a shared device, not encryption: the
+   data in IndexedDB stays readable to anyone with the device and devtools.
+   Settings says so on screen rather than overstating what this provides. */
+var SUBTLE=(window.crypto&&crypto.subtle&&crypto.subtle.deriveBits)?crypto.subtle:null;
+var ITER=210000;
+
+function b2a(buf){ return Array.prototype.slice.call(new Uint8Array(buf)) }
+function derive(pass,saltArr,iter){
+  var enc=new TextEncoder();
+  return SUBTLE.importKey('raw',enc.encode(pass),{name:'PBKDF2'},false,['deriveBits'])
+    .then(function(k){
+      return SUBTLE.deriveBits({name:'PBKDF2',salt:new Uint8Array(saltArr),iterations:iter,hash:'SHA-256'},k,256);
+    }).then(b2a);
+}
+function sameBytes(a,b){
+  if(!a||!b||a.length!==b.length)return false;
+  var d=0; for(var i=0;i<a.length;i++)d|=a[i]^b[i];
+  return d===0;                                   // constant time, no early exit
+}
+var AUTH={rec:null,loaded:false};
+function loadAuth(){
+  return DB.get('kv','auth').then(function(r){
+    AUTH.rec=(r&&r.hash&&r.salt)?r:null; AUTH.loaded=true; return AUTH.rec;
+  });
+}
+function hasPasscode(){ return !!AUTH.rec }
+function setPasscode(pass){
+  if(!SUBTLE)return Promise.reject(new Error('unavailable'));
+  var salt=b2a(crypto.getRandomValues(new Uint8Array(16)));
+  return derive(pass,salt,ITER).then(function(hash){
+    var rec={v:1,salt:salt,hash:hash,iter:ITER,updatedAt:Date.now()};
+    return DB.put('kv',rec,'auth').then(function(){ AUTH.rec=rec; return true });
+  });
+}
+function clearPasscode(){
+  return DB.del('kv','auth').then(function(){ AUTH.rec=null; unlockSession(); return true });
+}
+function verifyPasscode(pass){
+  if(!AUTH.rec||!SUBTLE)return Promise.resolve(false);
+  var r=AUTH.rec;
+  return derive(pass,r.salt,r.iter||ITER)
+    .then(function(h){ return sameBytes(h,r.hash) })
+    .catch(function(){ return false });
+}
+function unlockSession(){ SESSION.setItem('un','1') }
+function lockSession(){ SESSION.removeItem('un') }
+function sessionUnlocked(){ return SESSION.getItem('un')==='1' }
+
+/* --------------------------- article: the data --------------------------- */
+/* Career figures reflect reporting up to August 2026. Club crests are
+   trademarks, so each club gets a colour-matched monogram shield instead. */
+var CAREER=[
+  {n:1,club:'Sporting CP',mono:'SCP',years:'2002–2003',color:'#0a6b3d',c1:'#149255',c2:'#064026',
+   photo:'photos/1-sporting.jpg',
+   text:'Ronaldo joined Sporting’s youth academy at 12 and made his senior debut at just 17. His pace, skill and confidence quickly marked him as one of Portugal’s brightest prospects.',
+   stats:[['star','31 Appearances'],['ball','5 Goals']]},
+  {n:2,club:'Manchester United',mono:'MU',years:'2003–2009',color:'#d31217',c1:'#e02a20',c2:'#8b0b10',
+   photo:'photos/2-manutd.jpg',
+   text:'Under Sir Alex Ferguson, Ronaldo transformed into a world-class superstar. He won 3 Premier League titles, the Champions League and his first Ballon d’Or in 2008.',
+   stats:[['cup','9 Trophies'],['ball','118 Goals in 292 Apps'],['cup','1 Champions League']],
+   gate:true},
+  {n:3,club:'Real Madrid',mono:'RM',years:'2009–2018',color:'#1a4fa0',c1:'#2f6fd0',c2:'#10306a',
+   photo:'photos/3-realmadrid.jpg',
+   text:'Ronaldo’s prime years. He became Real Madrid’s all-time leading scorer and won 4 Champions League titles. He claimed 4 Ballon d’Or awards and set countless records.',
+   stats:[['cup','16 Trophies'],['ball','450 Goals in 438 Apps'],['cup','4 Champions League']]},
+  {n:4,club:'Juventus',mono:'JUV',years:'2018–2021',color:'#111318',c1:'#3a3f47',c2:'#0b0d11',
+   photo:'photos/4-juventus.jpg',
+   text:'Ronaldo brought his winning mentality to Italy, helping Juventus dominate Serie A. He won 2 league titles and became the first player to score 100+ goals for three clubs.',
+   stats:[['cup','5 Trophies'],['ball','101 Goals in 134 Apps'],['flag','2 Serie A Titles']]},
+  {n:5,club:'Manchester United Return',mono:'MU',years:'2021–2022',color:'#d31217',c1:'#e02a20',c2:'#8b0b10',
+   photo:'photos/5-manutd-return.jpg',
+   text:'Ronaldo’s return thrilled fans worldwide. He delivered important goals, including his 800th career goal, before leaving the club in November 2022.',
+   stats:[['ball','27 Goals in 54 Apps'],['star','800th Career Goal']]},
+  {n:6,club:'Al-Nassr',mono:'AN',years:'2023–PRESENT',color:'#1a3d8f',c1:'#f2c200',c2:'#1a3d8f',
+   photo:'photos/6-alnassr.jpg',
+   text:'Ronaldo moved to Saudi Arabia, inspiring a new era for the league. He passed 100 Saudi Pro League goals and lifted the 2025–26 title, and has said 2026–27 is probably his final year.',
+   stats:[['cup','League Champion 2025–26'],['ball','129 Goals in 148 Apps'],['cal','Contract until June 2027']]},
+  {n:7,club:'Portugal — International',mono:'POR',years:'2003–PRESENT',color:'#c1121f',c1:'#e02330',c2:'#0a6b3d',
+   photo:'photos/7-portugal.jpg',
+   text:'Ronaldo is football’s all-time leading international scorer. He captained Portugal to Euro 2016 glory and two Nations League titles, and at the 2026 World Cup became the first player to score at six different tournaments.',
+   stats:[['cup','Euro 2016 Winner'],['ball','146 Goals in 225 Caps'],['star','6 World Cups Scored In']]}
+];
+var SICO={
+  star:'<svg viewBox="0 0 24 24" fill="#e8a83a" aria-hidden="true"><path d="M12 2.6l2.8 5.8 6.4.9-4.6 4.4 1.1 6.3L12 17l-5.7 3 1.1-6.3L2.8 9.3l6.4-.9z"/></svg>',
+  ball:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#fff" stroke="#1a1a1a" stroke-width="1.6"/><path d="M12 7.1l3.4 2.5-1.3 4h-4.2l-1.3-4z" fill="#1a1a1a"/><g stroke="#1a1a1a" stroke-width="1.5" stroke-linecap="round"><path d="M12 7.1V3.6M15.4 9.6l3.3-1.1M14.1 13.6l2.1 2.8M9.9 13.6l-2.1 2.8M8.6 9.6L5.3 8.5"/></g></svg>',
+  cup:'<svg viewBox="0 0 24 24" fill="#d9a441" aria-hidden="true"><path d="M7 3h10v2h3v3.2c0 2.3-1.7 4.2-3.9 4.5A5.1 5.1 0 0 1 13 15.7V18h3.2v2.6H7.8V18H11v-2.3a5.1 5.1 0 0 1-3.1-3C5.7 12.4 4 10.5 4 8.2V5h3zm-1 4v1.2c0 1.1.7 2 1.7 2.3V7zm12 0h-1.7v3.5c1-.3 1.7-1.2 1.7-2.3z"/></svg>',
+  flag:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="6" height="14" fill="#0a7b3e"/><rect x="9" y="5" width="6" height="14" fill="#f2f2f2"/><rect x="15" y="5" width="6" height="14" fill="#c1121f"/></svg>',
+  cal:'<svg viewBox="0 0 24 24" fill="none" stroke="#3f78d8" stroke-width="1.8" aria-hidden="true"><rect x="3.4" y="5.2" width="17.2" height="15" rx="2.6"/><path d="M3.4 10h17.2M8 3.4v3.4M16 3.4v3.4" stroke-linecap="round"/></svg>',
+  target:'<svg viewBox="0 0 24 24" fill="none" stroke="#3f78d8" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1" fill="#3f78d8"/></svg>',
+  medal:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="15" r="6.2" fill="#e0b03c"/><path d="M8 2.6h3.1l1.4 6H9.9zm7.9 0H12.8l1.4 6h2.6z" fill="#c1121f"/><circle cx="12" cy="15" r="3.4" fill="#f3d478"/></svg>',
+  book:'<svg viewBox="0 0 24 24" fill="none" stroke="#3f78d8" stroke-width="1.8" aria-hidden="true"><rect x="3.6" y="4.4" width="16.8" height="15.4" rx="2.4"/><path d="M3.6 9h16.8M8 12.6h8M8 16h5" stroke-linecap="round"/></svg>'
+};
+
+function buildArticle(){
+  var a=$('#article');
+  var h='<div class="art"><header class="art-hero">'+
+    '<div class="por"><span>CR7</span><img src="photos/0-portrait.jpg" alt="" data-fallback></div>'+
+    '<h1>Cristiano Ronaldo</h1><h2>A Career Through the Years</h2>'+
+    '<p>From a talented teenager in Lisbon to a global icon of the beautiful game. Ronaldo’s journey is one of relentless dedication, record-breaking achievements and unmatched longevity.</p>'+
+    '</header><div class="tl">';
+
+  CAREER.forEach(function(s){
+    h+='<div class="tl-item">'+
+       '<div class="tl-dot">'+s.n+'</div>'+
+       '<'+(s.gate?'div':'div')+' class="tl-card"'+(s.gate?' data-gate="1" role="button" tabindex="0"':'')+'>'+
+         '<div class="tl-img" style="--c1:'+s.c1+';--c2:'+s.c2+'">'+
+           '<span class="mono">'+s.mono+'</span>'+
+           '<img src="'+s.photo+'" alt="" data-fallback>'+
+         '</div>'+
+         '<div class="tl-body" style="--club:'+s.color+';--c1:'+s.c1+';--c2:'+s.c2+'">'+
+           '<div class="tl-head">'+
+             '<span class="crest">'+s.mono+'</span>'+
+             '<span class="tl-club">'+s.club+'</span>'+
+             '<span class="tl-years">'+s.years+'</span>'+
+           '</div>'+
+           '<p class="tl-text">'+s.text+'</p>'+
+           '<div class="tl-stats">'+s.stats.map(function(st){
+              return '<span class="tl-stat">'+SICO[st[0]]+'<span>'+st[1]+'</span></span>';
+           }).join('')+'</div>'+
+         '</div>'+
+       '</div></div>';
+  });
+
+  h+='</div><div class="art-foot">'+
+    '<div class="fs">'+SICO.target+'<div><div class="k">Career Goals</div><div class="v">976</div><div class="n">24 from 1,000</div></div></div>'+
+    '<div class="fs">'+SICO.cup+'<div><div class="k">Major Trophies</div><div class="v">37+</div><div class="n">across clubs &amp; country</div></div></div>'+
+    '<div class="fs">'+SICO.medal+'<div><div class="k">Ballon d’Or</div><div class="v">5</div><div class="n">2008, 2013, 2014, 2016, 2017</div></div></div>'+
+    '<div class="fs">'+SICO.book+'<div><div class="k">Legacy</div><div class="v" style="font-size:clamp(13px,2.6vw,17px);line-height:1.35">One of the greatest</div><div class="n">players in football history, with unmatched longevity and impact.</div></div></div>'+
+    '</div>'+
+    '<p class="art-note">Figures reflect public reporting as of August 2026 and change as he plays. Club badges are trademarks of their clubs and are represented here by colour-matched monograms. Photographs are not included — drop your own licensed images into <code>photos/</code> to fill the frames.</p>'+
+    '</div>';
+  a.innerHTML=h;
+
+  // an image that isn't there should reveal the monogram, not a broken icon
+  $$('#article img[data-fallback]').forEach(function(im){
+    im.addEventListener('error',function(){ im.remove() },{once:true});
+  });
+
+  a.addEventListener('click',function(e){
+    var g=e.target.closest('[data-gate]'); if(g)enterFromArticle();
+  });
+  a.addEventListener('keydown',function(e){
+    if(e.key!=='Enter'&&e.key!==' ')return;
+    var g=e.target.closest&&e.target.closest('[data-gate]');
+    if(g){ e.preventDefault(); enterFromArticle() }
+  });
+}
+
+/* ------------------------------- navigation ------------------------------ */
+var SCREEN='article';
+
+function showArticle(){
+  SCREEN='article';
+  $('#lock').hidden=true; $('#lock').classList.remove('on');
+  $('#article').hidden=false; $('#article').classList.remove('leaving');
+  stage.style.visibility='hidden';
+  document.body.classList.remove('home');
+}
+function showHome(){
+  SCREEN='home';
+  $('#lock').hidden=true; $('#lock').classList.remove('on');
+  var a=$('#article');
+  a.classList.add('leaving');
+  stage.style.visibility='';
+  setTimeout(function(){ if(SCREEN==='home'){a.hidden=true;a.classList.remove('leaving')} },340);
+  document.body.classList.add('home');
+  layout();
+}
+function enterFromArticle(){
+  if(!hasPasscode()||sessionUnlocked()){ unlockSession(); showHome(); return }
+  showLock();
+}
+
+/* ------------------------------ lock screen ------------------------------ */
+var lockFails=0, lockBusy=false;
+function showLock(){
+  SCREEN='lock';
+  var l=$('#lock');
+  l.hidden=false;
+  requestAnimationFrame(function(){ l.classList.add('on') });
+  var i=$('#lockinput'); i.value=''; $('#lockgo').disabled=true;
+  setTimeout(function(){ try{i.focus()}catch(e){} },220);
+}
+function buildLock(){
+  var l=$('#lock');
+  l.innerHTML='<div class="lockbox">'+
+    '<h2>Is Ronaldo 1000th goal target possible?</h2>'+
+    '<input id="lockinput" type="password" inputmode="numeric" autocomplete="off" '+
+      'enterkeyhint="go" aria-label="Answer" maxlength="32">'+
+    '<button id="lockgo" disabled>Continue</button>'+
+    '<button class="back" id="lockback">Back to the article</button>'+
+    '</div>';
+  var input=$('#lockinput'), go=$('#lockgo');
+  input.addEventListener('input',function(){
+    input.value=input.value.replace(/\D/g,'');
+    go.disabled=!input.value||lockBusy;
+  });
+  input.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!go.disabled)submit() });
+  go.addEventListener('click',submit);
+  $('#lockback').addEventListener('click',showArticle);
+
+  function submit(){
+    if(lockBusy)return;
+    var val=input.value; if(!val)return;
+    lockBusy=true; go.disabled=true;
+    // a small, growing delay blunts rapid guessing without ever blocking forever
+    var wait=Math.min(120*Math.pow(2,Math.min(lockFails,5)),4000);
+    verifyPasscode(val).then(function(ok){
+      input.value='';
+      setTimeout(function(){
+        lockBusy=false;
+        if(ok){ lockFails=0; unlockSession(); showHome(); }
+        else{
+          // no message, no hint about which part was wrong: it simply
+          // returns to the article as though the section never opened
+          lockFails++;
+          var box=$('.lockbox');
+          if(box){ box.classList.add('shake'); setTimeout(function(){box.classList.remove('shake')},360) }
+          setTimeout(showArticle,260);
+        }
+      },ok?0:wait);
+    });
+  }
+}
+
+/* --------------------------- lock / relock hooks -------------------------- */
+function lockNow(){
+  lockSession();
+  if(current)closeApp(true);
+  if(hasPasscode())showLock(); else showArticle();
+}
+
+/* ==========================================================================
+   Settings
+   ========================================================================== */
+function gear(){
+  var t='';
+  for(var i=0;i<8;i++)t+='<rect x="46.5" y="12" width="7" height="15" rx="3.2" transform="rotate('+(i*45)+' 50 50)"/>';
+  return t;
+}
+ICON.settings='<svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="stg" x1="0" y1="0" x2="0" y2="1">'+
+  '<stop offset="0" stop-color="#b9bcc2"/><stop offset="1" stop-color="#7d8189"/></linearGradient></defs>'+
+  '<rect width="100" height="100" fill="url(#stg)"/><g fill="#f2f3f5">'+gear()+
+  '<circle cx="50" cy="50" r="27"/></g><circle cx="50" cy="50" r="19" fill="#8b8f97"/>'+
+  '<circle cx="50" cy="50" r="12.5" fill="#f2f3f5"/></svg>';
+
+ICON.calculator='<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="#1c1c1e"/>'+
+  '<rect x="66" y="8" width="26" height="84" rx="7" fill="#ff9f0a"/>'+
+  '<rect x="8" y="8" width="52" height="20" rx="5" fill="#3a3a3c"/>'+
+  '<g fill="#5a5a5e">'+
+  [0,1,2].map(function(r){return [0,1,2].map(function(c){
+    return '<rect x="'+(8+c*18)+'" y="'+(34+r*20)+'" width="16" height="16" rx="4"/>';
+  }).join('')}).join('')+
+  '</g><g fill="#fff"><rect x="73" y="24" width="12" height="3.4" rx="1.7"/>'+
+  '<rect x="77.3" y="19.7" width="3.4" height="12" rx="1.7"/>'+
+  '<rect x="73" y="46" width="12" height="3.4" rx="1.7"/>'+
+  '<rect x="73" y="66" width="12" height="3.4" rx="1.7"/><rect x="73" y="74" width="12" height="3.4" rx="1.7"/></g></svg>';
+
+REG.settings={
+  title:'Settings',
+  mount:function(api){
+    var root=api.root;
+    root.appendChild(el('div','safetop'));
+    var scroll=el('div','scroll'); root.appendChild(scroll);
+    root.appendChild(el('div','safebot'));
+
+    function row(tag,cls){ return el(tag,'set-row'+(cls?' '+cls:'')) }
+    function ico(svg){ var i=el('div','ic'); i.innerHTML=svg; return i }
+
+    function render(){
+      scroll.textContent='';
+      scroll.appendChild(el('div','set-title','Settings'));
+
+      /* ---- appearance ---- */
+      scroll.appendChild(el('div','set-grp','Appearance'));
+      var ap=el('div','set-card');
+
+      var dark=row('button');
+      dark.appendChild(ico('<svg viewBox="0 0 24 24" fill="none" stroke="#0a84ff" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>'));
+      dark.appendChild(el('div','lb','Dark mode'));
+      var sw=el('div','sw'+(PREF.dark?' on':'')); sw.setAttribute('role','switch');
+      sw.setAttribute('aria-checked',PREF.dark?'true':'false');
+      dark.appendChild(sw);
+      dark.addEventListener('click',function(){
+        PREF.dark=!PREF.dark; sw.classList.toggle('on',PREF.dark);
+        sw.setAttribute('aria-checked',PREF.dark?'true':'false');
+        applyPrefs(); savePrefs();
+      });
+      ap.appendChild(dark);
+
+      var br=row('div');
+      br.appendChild(ico('<svg viewBox="0 0 24 24" fill="#0a84ff"><path d="M13.4 2L5 13.2h5.2L9.4 22 19 10.4h-5.4z"/></svg>'));
+      br.appendChild(el('div','lb','Brightness'));
+      var sl=el('div','slider');
+      var inp=document.createElement('input');
+      inp.type='range'; inp.min='38'; inp.max='100'; inp.step='1';
+      inp.value=String(Math.round(PREF.brightness*100));
+      inp.setAttribute('aria-label','Brightness');
+      inp.style.setProperty('--pct',inp.value+'%');
+      sl.appendChild(inp); br.appendChild(sl);
+      inp.addEventListener('input',function(){
+        PREF.brightness=(+inp.value)/100;
+        inp.style.setProperty('--pct',inp.value+'%');
+        applyPrefs();
+      });
+      inp.addEventListener('change',savePrefs);
+      ap.appendChild(br);
+      scroll.appendChild(ap);
+
+      /* ---- security ---- */
+      scroll.appendChild(el('div','set-grp','Security'));
+      var se=el('div','set-card');
+      var on=hasPasscode();
+
+      var pw=row('button');
+      pw.appendChild(ico('<svg viewBox="0 0 24 24" fill="none" stroke="#34c759" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.8l7.4 2.6v6c0 4.4-3 8-7.4 9.8-4.4-1.8-7.4-5.4-7.4-9.8v-6z"/><path d="M8.8 12.2l2.2 2.2 4.2-4.4" stroke-linecap="round"/></svg>'));
+      pw.appendChild(el('div','lb','App password'));
+      pw.appendChild(el('div','val',on?'On':'Off'));
+      pw.addEventListener('click',function(){ on?null:setSheet() });
+      if(on)pw.disabled=true;
+      se.appendChild(pw);
+
+      var ch=row('button');
+      ch.appendChild(ico('<svg viewBox="0 0 24 24" fill="none" stroke="#0a84ff" stroke-width="1.8" stroke-linecap="round"><circle cx="8.4" cy="12" r="3.6"/><path d="M12 12h8.4M17.6 12v3M20.4 12v2.2"/></svg>'));
+      ch.appendChild(el('div','lb','Change password'));
+      ch.appendChild(el('div','act','Change'));
+      ch.addEventListener('click',function(){ on?changeSheet():setSheet() });
+      se.appendChild(ch);
+
+      var lk=row('button');
+      lk.appendChild(ico('<svg viewBox="0 0 24 24" fill="none" stroke="#8a8a8e" stroke-width="1.8"><rect x="5" y="10.4" width="14" height="10.2" rx="2.6"/><path d="M8.2 10.4V7.8a3.8 3.8 0 017.6 0v2.6" stroke-linecap="round"/></svg>'));
+      lk.appendChild(el('div','lb','Lock now'));
+      lk.appendChild(el('div','act','Lock'));
+      lk.addEventListener('click',function(){
+        if(!on){ api.toast('Set a password first'); return }
+        lockNow();
+      });
+      se.appendChild(lk);
+
+      var rm=row('button');
+      rm.appendChild(ico('<svg viewBox="0 0 24 24" fill="none" stroke="#ff3b30" stroke-width="1.8" stroke-linecap="round"><path d="M4 6.5h16M9.5 6.5V4.6h5v1.9M6.6 6.5l1 13.1h8.8l1-13.1M10 10v6M14 10v6"/></svg>'));
+      rm.appendChild(el('div','lb','Remove password'));
+      rm.appendChild(el('div','act danger','Remove'));
+      rm.addEventListener('click',function(){
+        if(!on){ api.toast('No password is set'); return }
+        removeSheet();
+      });
+      se.appendChild(rm);
+      scroll.appendChild(se);
+
+      var note=el('div','set-foot');
+      note.textContent = SUBTLE
+        ? 'This is a privacy screen, not encryption. It keeps someone else out of the app on a shared device, but anything stored locally remains readable to anyone with the device and developer tools.'
+        : 'Password protection needs a secure (https) connection and is unavailable here. Everything else works normally.';
+      scroll.appendChild(note);
+    }
+
+    /* ---------------------------- sheets ---------------------------- */
+    function sheet(title,fields,confirmLabel,danger,onSubmit){
+      var s=el('div','sheet');
+      var n=el('div','nav');
+      var cancel=navBtn('Cancel'); var t=el('div','title',title);
+      n.appendChild(cancel); n.appendChild(t); n.appendChild(el('div','spacer'));
+      s.appendChild(el('div','safetop')); s.appendChild(n);
+      var f=el('div','form');
+      var inputs=fields.map(function(ph,i){
+        var i2=document.createElement('input');
+        i2.type='password'; i2.inputMode='numeric'; i2.placeholder=ph;
+        i2.autocomplete='off'; i2.maxLength=32; i2.setAttribute('aria-label',ph);
+        i2.addEventListener('input',function(){
+          i2.value=i2.value.replace(/\D/g,''); err.textContent=''; sync();
+        });
+        f.appendChild(i2); return i2;
+      });
+      var err=el('div','err','');
+      var hint=el('div','hint','Digits only, 4 or more. This same password opens the app from the article.');
+      var go=el('button','go'+(danger?' danger':'')); go.textContent=confirmLabel;
+      f.appendChild(err);
+      if(!danger)f.appendChild(hint);
+      f.appendChild(go);
+      s.appendChild(f);
+      root.appendChild(s);
+      setTimeout(function(){ if(inputs[0])inputs[0].focus() },240);
+
+      function sync(){ go.disabled=inputs.some(function(i){return i.value.length<4}) }
+      sync();
+      cancel.addEventListener('click',function(){ s.remove() });
+      go.addEventListener('click',function(){
+        go.disabled=true;
+        onSubmit(inputs.map(function(i){return i.value}),function(msg){
+          err.textContent=msg; go.disabled=false;
+          inputs.forEach(function(i){i.value=''}); sync();
+          if(inputs[0])inputs[0].focus();
+        },function(){ s.remove(); render(); });
+      });
+      inputs.forEach(function(i){
+        i.addEventListener('keydown',function(e){ if(e.key==='Enter'&&!go.disabled)go.click() });
+      });
+      return s;
+    }
+
+    function setSheet(){
+      sheet('Set Password',['New password','Confirm password'],'Set Password',false,function(v,fail,done){
+        if(v[0]!==v[1])return fail('Those don’t match.');
+        setPasscode(v[0]).then(function(){
+          unlockSession(); api.toast('Password set'); done();
+        }).catch(function(){ fail('Couldn’t save the password here.') });
+      });
+    }
+    function changeSheet(){
+      sheet('Change Password',['Current password','New password','Confirm new password'],'Change Password',false,function(v,fail,done){
+        if(v[1]!==v[2])return fail('The new ones don’t match.');
+        verifyPasscode(v[0]).then(function(ok){
+          if(!ok)return fail('That current password isn’t right.');
+          return setPasscode(v[1]).then(function(){
+            unlockSession(); api.toast('Password changed'); done();
+          });
+        }).catch(function(){ fail('Couldn’t save the password here.') });
+      });
+    }
+    function removeSheet(){
+      var s=sheet('Remove Password',['Current password'],'Remove Password',true,function(v,fail,done){
+        verifyPasscode(v[0]).then(function(ok){
+          if(!ok)return fail('That password isn’t right.');
+          return clearPasscode().then(function(){
+            api.toast('Password removed'); done();
+          });
+        }).catch(function(){ fail('Couldn’t remove the password.') });
+      });
+      var h=el('div','hint','The article will open the Home Screen without asking for anything.');
+      h.style.color='var(--ink3)';
+      s.querySelector('.form').insertBefore(h,s.querySelector('.go'));
+    }
+
+    render();
+  }
+};
+
+/* ==========================================================================
+   Calculator
+   ========================================================================== */
+REG.calculator={
+  title:'Calculator',
+  mount:function(api){
+    var root=api.root;
+    root.appendChild(el('div','safetop'));
+    var wrap=el('div','calc-wrap');
+    var out=el('div','calc-out','0'); out.setAttribute('aria-live','polite'); out.setAttribute('role','status');
+    var keys=el('div','calc-keys');
+    wrap.appendChild(out); wrap.appendChild(keys);
+    root.appendChild(wrap); root.appendChild(el('div','safebot'));
+
+    var entry='0', acc=null, op=null, fresh=true, err=false, lastRhs=null;
+
+    function fmt(n){
+      if(!isFinite(n))return 'Error';
+      var neg=n<0; n=Math.abs(n);
+      var s;
+      if(n!==0&&(n>=1e9||n<1e-6)) s=n.toExponential(5).replace(/e([+-])(\d)$/,'e$10$2');
+      else{
+        s=String(Math.round(n*1e9)/1e9);
+        if(s.indexOf('e')<0){
+          var p=s.split('.');
+          p[0]=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,',');
+          s=p.join('.');
+        }
+      }
+      return (neg?'-':'')+s;
+    }
+    function show(){
+      if(err){ out.textContent='Error'; return }
+      if(fresh&&acc!==null&&op&&entry==='0'){ out.textContent=fmt(acc); return }
+      var t=entry;
+      if(t.indexOf('.')<0&&t!=='-'){
+        var neg=t[0]==='-'; var d=neg?t.slice(1):t;
+        t=(neg?'-':'')+d.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+      }else if(t.indexOf('.')>0){
+        var q=t.split('.'); var ng=q[0][0]==='-';
+        var w=ng?q[0].slice(1):q[0];
+        t=(ng?'-':'')+w.replace(/\B(?=(\d{3})+(?!\d))/g,',')+'.'+q[1];
+      }
+      out.textContent=t;
+      out.style.fontSize=t.length>9?('clamp(28px,'+(15-Math.min(t.length-9,5))+'vw,56px)'):'';
+    }
+    function digit(d){
+      if(err)reset();
+      if(fresh){ entry=(d==='.')?'0.':d; fresh=false }
+      else{
+        if(d==='.'&&entry.indexOf('.')>=0)return;
+        if(entry.replace(/[-.]/g,'').length>=9)return;
+        entry=(entry==='0'&&d!=='.')?d:entry+d;
+      }
+      show(); armOp(null);
+    }
+    function value(){ return parseFloat(entry.replace(/,/g,''))||0 }
+    function compute(a,b,o){
+      switch(o){
+        case '+':return a+b; case '-':return a-b;
+        case '×':return a*b; case '÷':return b===0?NaN:a/b;
+      }
+      return b;
+    }
+    function setOp(o){
+      if(err)return;
+      if(op&&!fresh){ var r=compute(acc,value(),op); if(!isFinite(r))return fail(); acc=r; entry=String(acc); show() }
+      else if(acc===null||!op) acc=value();
+      op=o; fresh=true; lastRhs=null; armOp(o);
+    }
+    function equals(){
+      if(err)return;
+      if(op===null)return;
+      var rhs = fresh&&lastRhs!==null ? lastRhs : value();
+      var r=compute(acc,rhs,op);
+      if(!isFinite(r))return fail();
+      lastRhs=rhs; acc=r; entry=String(r); fresh=true;
+      out.textContent=fmt(r); armOp(null);
+      // keep op so pressing = again repeats the operation, as iOS does
+    }
+    function fail(){ err=true; acc=null; op=null; fresh=true; entry='0'; show(); armOp(null) }
+    function reset(){ err=false; acc=null; op=null; lastRhs=null; entry='0'; fresh=true; show(); armOp(null); acLabel() }
+    function clearEntry(){ entry='0'; fresh=true; err=false; show(); acLabel() }
+    function sign(){ if(err)return; entry=entry[0]==='-'?entry.slice(1):('-'+entry); if(entry==='-0')entry='0'; show() }
+    function percent(){ if(err)return; var v=value()/100; entry=String(v); fresh=false; show() }
+    function armOp(o){
+      $$('.ck.op',keys).forEach(function(b){ b.classList.toggle('armed',!!o&&b.dataset.k===o) });
+    }
+    function acLabel(){
+      var b=keys.querySelector('[data-k="AC"]');
+      if(b)b.textContent=(entry!=='0'&&!fresh)||err?'C':'AC';
+    }
+
+    var LAYOUT_K=[
+      ['AC','top'],['+/−','top'],['%','top'],['÷','op'],
+      ['7',''],['8',''],['9',''],['×','op'],
+      ['4',''],['5',''],['6',''],['−','op'],
+      ['1',''],['2',''],['3',''],['+','op'],
+      ['0','zero'],['.',''],['=','op']
+    ];
+    LAYOUT_K.forEach(function(k){
+      var b=el('button','ck'+(k[1]?' '+k[1]:''),k[0]);
+      var key=k[0]==='−'?'-':k[0];
+      b.dataset.k=key; b.setAttribute('aria-label',k[0]);
+      keys.appendChild(b);
+    });
+
+    keys.addEventListener('click',function(e){
+      var b=e.target.closest('.ck'); if(!b)return;
+      var k=b.dataset.k;
+      if(/^[0-9.]$/.test(k))digit(k);
+      else if(k==='AC'){ b.textContent==='C'?clearEntry():reset() }
+      else if(k==='+/−')sign();
+      else if(k==='%')percent();
+      else if(k==='=')equals();
+      else setOp(k==='-'?'-':k);
+      acLabel();
+    });
+
+    function onKey(e){
+      if(!current||current.id!=='calculator')return;
+      var k=e.key;
+      if(/^[0-9]$/.test(k))digit(k);
+      else if(k==='.'||k===',')digit('.');
+      else if(k==='+'||k==='-')setOp(k==='-'?'-':'+');
+      else if(k==='*'||k==='x'||k==='X')setOp('×');
+      else if(k==='/')setOp('÷');
+      else if(k==='%')percent();
+      else if(k==='Enter'||k==='=')equals();
+      else if(k==='Backspace'){
+        if(err||fresh)return;
+        entry=entry.length>1?entry.slice(0,-1):'0';
+        if(entry==='-')entry='0';
+        show();
+      }
+      else if(k==='Escape'){ reset(); e.stopPropagation() }
+      else return;
+      acLabel(); e.preventDefault();
+    }
+    document.addEventListener('keydown',onKey,true);
+    this.__off=function(){ document.removeEventListener('keydown',onKey,true) };
+    show(); acLabel();
+  },
+  unmount:function(){ if(this.__off)this.__off() }
+};
+
+/* ==========================================================================
+   boot: dock/grid icons, then article -> passcode -> home
+   ========================================================================== */
+$('#ico-calc').innerHTML=ICON.calculator;
+$('#ico-set').innerHTML=ICON.settings;
+
+stage.style.visibility='hidden';
+buildArticle();
+buildLock();
+Promise.all([loadPrefs(),loadAuth()]).then(function(){
+  showArticle();          // the article is always the first screen
 });
 
 })();

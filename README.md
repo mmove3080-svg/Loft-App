@@ -31,10 +31,46 @@ Cloudflare Pages, S3). Nothing needs to be compiled.
 and Edge — the install button in the address bar. It launches standalone, without browser
 chrome.
 
+## How it opens
+
+The app opens on a **Cristiano Ronaldo career article**. Selecting the **Manchester United
+2003–2009** entry opens the Home Screen — via a passcode prompt if one is set in Settings.
+Nothing on that entry marks it as a way in; it reads as an ordinary section of the article.
+
+### About the passcode
+
+Set it in **Settings → App password**. The same password is used everywhere — Change,
+Remove, Lock now and the article entry all read one record, so there is no second password
+to keep in sync.
+
+It is stored as a PBKDF2-SHA256 hash (210,000 iterations, random 16-byte salt) via
+WebCrypto. The plaintext is never written to storage, never logged, and never placed in
+source. Wrong entries produce no message and no hint about what was wrong — the article
+simply returns, as though the section had not opened — and repeated failures are slowed
+progressively to blunt guessing.
+
+**Be clear about what this is:** a privacy screen, not encryption. It keeps a passer-by out
+of the app on a shared device. Anyone with the device and browser developer tools can still
+read what's in IndexedDB, and nothing here changes that. Settings says so on screen.
+WebCrypto needs a secure origin, so password protection is available over https (and on
+localhost) and is disabled with an explanation elsewhere.
+
+### Photographs and club badges
+
+The article's image frames ship with **colour-matched placeholder graphics**, not
+photographs of Ronaldo — those are copyrighted sports photography. To use real images,
+replace the eight files in `photos/` keeping the same names. Club badges are registered
+trademarks, so each club is represented by a colour-matched monogram shield in the badge
+position rather than a reproduction of the crest.
+
+Career figures reflect public reporting as of August 2026 (976 career goals, Al-Nassr
+contract to June 2027) and will drift as he keeps playing. They live in the `CAREER` array
+near the top of the script if you want to update them.
+
 ## What's on screen
 
-Only what the reference shows: the Weather, Clock, Calendar, iPad battery, and Photos
-widgets, and a dock of Photos, Notes, Phone, Messages. No extra apps, no folder, no page
+The Clock, Calendar, iPad battery and Photos widgets, a Calculator and Settings row where
+the Weather widget used to be, and a dock of Photos, Notes, Phone, Messages. No extra apps, no folder, no page
 indicator, and deliberately **no signal bars, Wi-Fi, carrier, or battery indicator** — the
 status bar shows the real time and nothing else.
 
@@ -50,6 +86,10 @@ a real count once you've imported anything.
   place calls, so the call screen says so and offers a `tel:` handoff to the real dialer.
 - **Messages** — local conversations you can open, write in, and delete. Nothing is sent
   over a network; the app says so on screen.
+- **Calculator** — iOS-style arithmetic: decimals, sign, percent, AC/C, repeat-equals,
+  and keyboard input. Division by zero shows Error and recovers on the next entry.
+- **Settings** — Dark mode and Brightness (both take effect immediately and persist), plus
+  the Security section described above.
 
 ## Data
 
@@ -89,40 +129,6 @@ Measured on a cold load: 0 network requests after the document, DOMContentLoaded
 first contentful paint ~215 ms, ~9.5 MB JS heap. Thumbnails decode lazily through an
 IntersectionObserver and object URLs are revoked when a view closes, so the gallery stays
 flat in memory as it grows. The clock stops ticking when the tab is hidden.
-
-## Deploying to Vercel
-
-This is a static site — there is no build step and no dependencies.
-
-```
-git init
-git add .
-git commit -m "Home Screen PWA"
-git branch -M main
-git remote add origin git@github.com:<you>/<repo>.git
-git push -u origin main
-```
-
-Then in Vercel: **Add New → Project → import the repo**, and deploy with the defaults:
-
-| Setting | Value |
-|---|---|
-| Framework Preset | Other |
-| Root Directory | `./` |
-| Build Command | leave empty (or `echo "static"`) |
-| Output Directory | leave empty |
-| Install Command | leave empty |
-
-`vercel.json` is included and sets the headers that matter: `sw.js` and `index.html` are
-revalidated on every request so updates reach installed apps, `manifest.webmanifest` is
-served with the right content type, and `icons/` is cached for a year.
-
-To update after a change, bump `VERSION` in `sw.js`, then commit and push — Vercel
-redeploys on push, the new worker precaches the shell before taking over, and old caches
-are dropped.
-
-Installed apps keep their data across deploys: photos, notes, and conversations live in
-IndexedDB on the device, which a deploy never touches.
 
 ## Updating
 

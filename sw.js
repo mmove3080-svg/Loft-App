@@ -2,7 +2,7 @@
    Precaches the shell, serves it cache-first, and swaps in a new version
    only after the whole new shell has downloaded. User media never touches
    this cache: it lives in IndexedDB on the device. */
-const VERSION = 'home-v1';
+const VERSION = 'home-v2';
 const SHELL = [
   './',
   './index.html',
@@ -10,7 +10,15 @@ const SHELL = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
-  './icons/apple-touch-icon.png'
+  './icons/apple-touch-icon.png',
+  './photos/0-portrait.jpg',
+  './photos/1-sporting.jpg',
+  './photos/2-manutd.jpg',
+  './photos/3-realmadrid.jpg',
+  './photos/4-juventus.jpg',
+  './photos/5-manutd-return.jpg',
+  './photos/6-alnassr.jpg',
+  './photos/7-portugal.jpg'
 ];
 
 self.addEventListener('install', (e) => {
