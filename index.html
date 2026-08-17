@@ -106,16 +106,6 @@ body.app-open #stage{transform:scale(.94);opacity:0;pointer-events:none}
 .w-med{grid-column:span 4;grid-row:span 2}
 .w-sm{grid-column:span 2;grid-row:span 2}
 
-/* -- weather -- */
-#w-weather{background:linear-gradient(165deg,#8d99b4 0%,#6c7a97 46%,#4a5872 100%)}
-#w-weather .sky{position:absolute;inset:0;width:100%;height:100%;display:block}
-#w-weather .veil{position:absolute;inset:0;background:linear-gradient(102deg,rgba(34,46,68,.62) 0%,rgba(44,56,80,.24) 42%,transparent 64%),linear-gradient(180deg,rgba(255,255,255,.06),transparent 40%)}
-.wx{position:absolute;inset:0;padding:calc(var(--colw)*.228);display:flex;flex-direction:column;text-shadow:0 1px 4px rgba(0,0,0,.3)}
-.wx .city{font-size:calc(var(--colw)*.26);font-weight:600;letter-spacing:.1px}
-.wx .temp{font-size:calc(var(--colw)*.678);font-weight:300;line-height:1.02;margin-top:calc(var(--colw)*.033);letter-spacing:-.02em}
-.wx .cond{font-size:calc(var(--colw)*.249);font-weight:600;margin-top:auto}
-.wx .sun{width:calc(var(--colw)*.336);height:calc(var(--colw)*.336);margin-bottom:calc(var(--colw)*.065)}
-
 /* -- clock -- */
 #w-clock{background:rgba(18,18,20,.78)}
 .clock-svg{position:absolute;inset:8%;width:84%;height:84%}
@@ -1709,6 +1699,7 @@ REG.phone={
       });
     }
 
+    var callTimer=null;
     function startCall(name,number){
       var sc=el('div','callscreen');
       sc.appendChild(el('div','cn',name||fmtNumber(number)));
@@ -1719,11 +1710,13 @@ REG.phone={
       var end=el('button','end'); end.innerHTML=G.phoneSm; end.style.color='#fff'; end.setAttribute('aria-label','End call');
       sc.appendChild(note); sc.appendChild(open); sc.appendChild(end);
       root.appendChild(sc);
-      var t0=Date.now(), iv=setInterval(function(){
+      var t0=Date.now();
+      clearInterval(callTimer);
+      callTimer=setInterval(function(){
         var s=Math.floor((Date.now()-t0)/1000);
         st.textContent=s<3?'calling…':dur(s);
       },500);
-      end.addEventListener('click',function(){ clearInterval(iv); sc.remove() });
+      end.addEventListener('click',function(){ clearInterval(callTimer); callTimer=null; sc.remove() });
       var rec={id:uid(),name:name||null,number:number,ts:Date.now()};
       recents.unshift(rec); recents=recents.slice(0,80); save();
       dialed='';
@@ -1733,7 +1726,11 @@ REG.phone={
       contacts=r[0]||[]; recents=r[1]||[];
       render();
     });
-  }
+
+    // a call left running must not keep ticking after the app is dismissed
+    this.__stop=function(){ clearInterval(callTimer); callTimer=null };
+  },
+  unmount:function(){ if(this.__stop)this.__stop() }
 };
 
 /* ==========================================================================
@@ -1979,8 +1976,7 @@ var CAREER=[
   {n:2,club:'Manchester United',mono:'MU',years:'2003–2009',color:'#d31217',c1:'#e02a20',c2:'#8b0b10',
    photo:'photos/2-manutd.jpg',
    text:'Under Sir Alex Ferguson, Ronaldo transformed into a world-class superstar. He won 3 Premier League titles, the Champions League and his first Ballon d’Or in 2008.',
-   stats:[['cup','9 Trophies'],['ball','118 Goals in 292 Apps'],['cup','1 Champions League']],
-   gate:true},
+   stats:[['cup','9 Trophies'],['ball','118 Goals in 292 Apps'],['cup','1 Champions League']]},
   {n:3,club:'Real Madrid',mono:'RM',years:'2009–2018',color:'#1a4fa0',c1:'#2f6fd0',c2:'#10306a',
    photo:'photos/3-realmadrid.jpg',
    text:'Ronaldo’s prime years. He became Real Madrid’s all-time leading scorer and won 4 Champions League titles. He claimed 4 Ballon d’Or awards and set countless records.',
@@ -1992,7 +1988,8 @@ var CAREER=[
   {n:5,club:'Manchester United Return',mono:'MU',years:'2021–2022',color:'#d31217',c1:'#e02a20',c2:'#8b0b10',
    photo:'photos/5-manutd-return.jpg',
    text:'Ronaldo’s return thrilled fans worldwide. He delivered important goals, including his 800th career goal, before leaving the club in November 2022.',
-   stats:[['ball','27 Goals in 54 Apps'],['star','800th Career Goal']]},
+   stats:[['ball','27 Goals in 54 Apps'],['star','800th Career Goal']],
+   gate:true},
   {n:6,club:'Al-Nassr',mono:'AN',years:'2023–PRESENT',color:'#1a3d8f',c1:'#f2c200',c2:'#1a3d8f',
    photo:'photos/6-alnassr.jpg',
    text:'Ronaldo moved to Saudi Arabia, inspiring a new era for the league. He passed 100 Saudi Pro League goals and lifted the 2025–26 title, and has said 2026–27 is probably his final year.',
@@ -2024,7 +2021,7 @@ function buildArticle(){
   CAREER.forEach(function(s){
     h+='<div class="tl-item">'+
        '<div class="tl-dot">'+s.n+'</div>'+
-       '<'+(s.gate?'div':'div')+' class="tl-card"'+(s.gate?' data-gate="1" role="button" tabindex="0"':'')+'>'+
+       '<div class="tl-card">'+
          '<div class="tl-img" style="--c1:'+s.c1+';--c2:'+s.c2+'">'+
            '<span class="mono">'+s.mono+'</span>'+
            '<img src="'+s.photo+'" alt="" data-fallback>'+
@@ -2033,7 +2030,7 @@ function buildArticle(){
            '<div class="tl-head">'+
              '<span class="crest">'+s.mono+'</span>'+
              '<span class="tl-club">'+s.club+'</span>'+
-             '<span class="tl-years">'+s.years+'</span>'+
+             '<span class="tl-years"'+(s.gate?' data-gate="1" role="button" tabindex="0"':'')+'>'+s.years+'</span>'+
            '</div>'+
            '<p class="tl-text">'+s.text+'</p>'+
            '<div class="tl-stats">'+s.stats.map(function(st){

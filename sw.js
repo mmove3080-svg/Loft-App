@@ -2,7 +2,7 @@
    Precaches the shell, serves it cache-first, and swaps in a new version
    only after the whole new shell has downloaded. User media never touches
    this cache: it lives in IndexedDB on the device. */
-const VERSION = 'home-v2';
+const VERSION = 'home-v3';
 const SHELL = [
   './',
   './index.html',
