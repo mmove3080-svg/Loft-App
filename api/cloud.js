@@ -2,6 +2,7 @@
 const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command} = require('@aws-sdk/client-s3');
 const {HttpError, settings, owner, snapshotId, partId} = require('../lib/security');
 const {manage} = require('../lib/snapshots');
+const {syncIndex} = require('../lib/sync');
 let client;
 function storage() {
   const e = process.env;
@@ -29,6 +30,11 @@ module.exports = async function handler(req, res) {
       const result = await s3.send(new ListObjectsV2Command({Bucket, Prefix: prefix + 'commits/', MaxKeys: 100, ContinuationToken: token || undefined}));
       return res.status(200).json({items: (result.Contents || []).map(x => ({id: x.Key.slice((prefix+'commits/').length).replace(/\.json$/, ''), savedAt: x.LastModified})), cursor: result.NextContinuationToken || null});
     }
+    if(action==='sync-index'||action==='sync-cleanup'){
+      let body=req.body;
+      if(typeof body==='string'){try{body=JSON.parse(body);}catch{throw new HttpError(400,'Invalid JSON.');}}
+      return res.status(200).json(await syncIndex({s3,Bucket,prefix,method:req.method,body,cleanup:action==='sync-cleanup'}));
+    }
     const id = snapshotId(req.query.id);
     if (['browse','remove-record','cleanup','delete-snapshot'].includes(action)) {
       if (req.method !== (action === 'browse' ? 'GET' : 'POST')) throw new HttpError(405, 'Method not allowed.');
@@ -36,9 +42,9 @@ module.exports = async function handler(req, res) {
       if(typeof body==='string'){try{body=JSON.parse(body);}catch{throw new HttpError(400,'Invalid JSON.');}}
       return res.status(200).json(await manage({s3,Bucket,prefix,id,action,body}));
     }
-    const isPart = action === 'part';
+    const isPart = action === 'part' || action === 'sync-part';
     if (!isPart && action !== 'commit') throw new HttpError(400, 'Unknown action.');
-    const key = prefix + (isPart ? 'parts/' + id + '/' + partId(req.query.part) : 'commits/' + id + '.json');
+    const key = prefix + (action === 'sync-part' ? 'sync/parts/' + id + '/' + partId(req.query.part) : isPart ? 'parts/' + id + '/' + partId(req.query.part) : 'commits/' + id + '.json');
     if (req.method === 'GET') {
       const result = await s3.send(new GetObjectCommand({Bucket, Key: key}));
       const body = await result.Body.transformToByteArray();

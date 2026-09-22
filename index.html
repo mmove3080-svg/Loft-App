@@ -635,6 +635,7 @@ button.set-row:active{background:rgba(120,120,128,.12)}
 <div id="applayer"></div>
 <input type="file" id="filepicker" multiple accept="image/*,video/*,.heic,.heif,.mov" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true">
 
+<script src="sync-engine.js"></script>
 <script src="cloud.js"></script>
 <script>
 /* ==========================================================================
@@ -720,12 +721,16 @@ var DB={
   }).catch(function(){return undefined})},
   put:function(n,v,k){return openDB().then(function(d){
     if(!d){memfall[n].set(k!=null?k:v.id,v);return v}
-    var t=d.transaction(n,'readwrite');
-    return reqp(k!=null?t.objectStore(n).put(v,k):t.objectStore(n).put(v));
+    var t=d.transaction(n==='kv'?['kv']:[n,'kv'],'readwrite');
+    if(n!=='kv'){var revision=t.objectStore('kv').get('sync-local-revision');revision.onsuccess=function(){t.objectStore('kv').put((revision.result||0)+1,'sync-local-revision')};}
+    if(k!=null)t.objectStore(n).put(v,k);else t.objectStore(n).put(v);
+    return new Promise(function(resolve,reject){t.oncomplete=function(){resolve(v)};t.onerror=t.onabort=function(){reject(t.error)}});
   }).catch(function(){return null})},
   del:function(n,k){return openDB().then(function(d){
     if(!d){memfall[n].delete(k);return}
-    return reqp(d.transaction(n,'readwrite').objectStore(n).delete(k));
+    var t=d.transaction(n==='kv'?['kv']:[n,'kv'],'readwrite');t.objectStore(n).delete(k);
+    if(n!=='kv'){var revision=t.objectStore('kv').get('sync-local-revision');revision.onsuccess=function(){t.objectStore('kv').put((revision.result||0)+1,'sync-local-revision')};}
+    return new Promise(function(resolve,reject){t.oncomplete=resolve;t.onerror=t.onabort=function(){reject(t.error)}});
   }).catch(function(){})}
 };
 
@@ -2190,7 +2195,7 @@ REG.settings={
     function render(){
       scroll.textContent='';
       scroll.appendChild(el('div','set-title','Settings'));
-      if(window.LoftCloud) window.LoftCloud.mount(scroll, {openDB:openDB, refresh:function(){DB.all('media').then(renderPhotosWidget);}});
+      if(window.LoftCloud) window.LoftCloud.mount(scroll, {openDB:openDB, canSync:function(){return !current || current.id==='settings';}, refresh:function(){DB.all('media').then(renderPhotosWidget);}});
 
       /* ---- appearance ---- */
       scroll.appendChild(el('div','set-grp','Appearance'));
