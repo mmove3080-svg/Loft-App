@@ -1,10 +1,8 @@
-/* Home — service worker.
-   Precaches the shell, serves it cache-first, and swaps in a new version
-   only after the whole new shell has downloaded. User media never touches
-   this cache: it lives in IndexedDB on the device. */
-const VERSION = 'home-v3';
+/* Only public app assets enter this cache. IndexedDB is never cleared here. */
+const VERSION = 'loft-public-v4';
 const SHELL = [
   './',
+  './cloud.js',
   './index.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
@@ -20,54 +18,21 @@ const SHELL = [
   './photos/6-alnassr.jpg',
   './photos/7-portugal.jpg'
 ];
-
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(VERSION)
-      .then((c) => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
-  );
+const PUBLIC = new Set(SHELL.map(path => new URL(path, self.location.href).pathname));
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(VERSION).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
-
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+self.addEventListener('activate', event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== VERSION && (/^home-v/.test(key) || /^loft-public-/.test(key))).map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });
-
-self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-
-  // Navigations: cache-first on the shell so cold starts are instant offline.
-  if (req.mode === 'navigate') {
-    e.respondWith(
-      caches.match('./index.html').then((hit) =>
-        hit || fetch(req).catch(() => caches.match('./'))
-      )
-    );
-    return;
-  }
-
-  e.respondWith(
-    caches.match(req).then((hit) => {
-      if (hit) return hit;
-      return fetch(req).then((res) => {
-        if (res && res.ok && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(req, copy));
-        }
-        return res;
-      }).catch(() => hit);
-    })
-  );
+self.addEventListener('fetch', event => {
+  const req = event.request, url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.search || !PUBLIC.has(url.pathname) || req.headers.has('Authorization')) return;
+  event.respondWith(caches.open(VERSION).then(async cache => {
+    const hit = await cache.match(req);
+    if (hit) return hit;
+    // Uncached responses are returned, never dynamically added to the cache.
+    return fetch(req);
+  }));
 });
-
-self.addEventListener('message', (e) => {
-  if (e.data === 'skipWaiting') self.skipWaiting();
-});
+self.addEventListener('message', event => {if(event.data === 'skipWaiting') self.skipWaiting();});

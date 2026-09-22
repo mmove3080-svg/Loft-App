@@ -635,10 +635,11 @@ button.set-row:active{background:rgba(120,120,128,.12)}
 <div id="applayer"></div>
 <input type="file" id="filepicker" multiple accept="image/*,video/*,.heic,.heif,.mov" style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true">
 
+<script src="cloud.js"></script>
 <script>
 /* ==========================================================================
    Home — an iOS-style Home Screen for the web.
-   No frameworks, no network requests, no external assets.
+   Local app with optional private cloud snapshots.
    ========================================================================== */
 (function(){
 'use strict';
@@ -1193,7 +1194,7 @@ REG.photos={
 
       if(!items.length){
         var e=el('div','empty');
-        e.innerHTML=G.imageIco+'<h3>No photos yet</h3><p>Import photos and videos from this device. They stay on it — nothing is uploaded.</p>';
+        e.innerHTML=G.imageIco+'<h3>No photos yet</h3><p>Import photos and videos from this device. They stay local until you save a cloud snapshot in Settings.</p>';
         var p=el('button','pill'); p.innerHTML=G.plus+'<span>Import</span>';
         p.addEventListener('click',pick); e.appendChild(p);
         scroll.appendChild(e);
@@ -1596,7 +1597,7 @@ REG.phone={
       var list=contacts.filter(function(c){return !favOnly||c.fav}).sort(function(a,b){return a.name.localeCompare(b.name)});
       if(!list.length){
         body.appendChild(emptyState(G.person, favOnly?'No favorites':'No contacts',
-          favOnly?'Star a contact to keep it here.':'Contacts are stored on this device only.',
+          favOnly?'Star a contact to keep it here.':'Contacts are stored locally. Back them up from Cloud Storage in Settings.',
           {label:'Add contact',fn:addContactForm}));
         return;
       }
@@ -1685,7 +1686,7 @@ REG.phone={
       var nameI=document.createElement('input'); nameI.placeholder='Name'; nameI.setAttribute('data-autofocus','');
       var numI=document.createElement('input'); numI.placeholder='Phone number'; numI.type='tel'; numI.inputMode='tel';
       f.appendChild(nameI); f.appendChild(numI);
-      var hint=el('div','localnote','Saved to this device. Nothing is sent anywhere.');
+      var hint=el('div','localnote','Saved locally. Include it in a cloud snapshot from Settings.');
       f.appendChild(hint);
       sheet.appendChild(f);
       root.appendChild(sheet);
@@ -1754,7 +1755,7 @@ REG.messages={
 
     function renderList(){
       list.textContent='';
-      var note=el('div','localnote','Conversations live on this device. Messages are not sent over any network.');
+      var note=el('div','localnote','Conversations are saved locally and can be backed up to your private cloud. Messages are not delivered to other people.');
       list.appendChild(note);
       if(!chats.length){
         list.appendChild((function(){var e=el('div','empty');
@@ -2189,6 +2190,7 @@ REG.settings={
     function render(){
       scroll.textContent='';
       scroll.appendChild(el('div','set-title','Settings'));
+      if(window.LoftCloud) window.LoftCloud.mount(scroll, {openDB:openDB, refresh:function(){DB.all('media').then(renderPhotosWidget);}});
 
       /* ---- appearance ---- */
       scroll.appendChild(el('div','set-grp','Appearance'));

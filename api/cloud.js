@@ -1,0 +1,60 @@
+'use strict';
+const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command} = require('@aws-sdk/client-s3');
+const {HttpError, settings, owner, snapshotId, partId} = require('../lib/security');
+let client;
+function storage() {
+  const e = process.env;
+  if (!e.R2_ENDPOINT || !e.R2_ACCESS_KEY_ID || !e.R2_SECRET_ACCESS_KEY || !e.R2_BUCKET_NAME) throw new HttpError(503, 'R2 storage is not configured.');
+  const endpoint = new URL(e.R2_ENDPOINT);
+  if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.r2.cloudflarestorage.com') || endpoint.pathname !== '/' || endpoint.search || endpoint.username || endpoint.password) throw new HttpError(503, 'Check R2_ENDPOINT: use the account S3 endpoint without a bucket path.');
+  if (!client) client = new S3Client({region: e.R2_REGION || 'auto', endpoint: e.R2_ENDPOINT, credentials: {accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY}});
+  return {s3: client, Bucket: e.R2_BUCKET_NAME};
+}
+module.exports = async function handler(req, res) {
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  try {
+    const cfg = settings();
+    const action = req.query.action;
+    if (action === 'config' && req.method === 'GET') return res.status(200).json({url: cfg.url, publishableKey: cfg.key});
+    const uid = await owner(req, cfg);
+    if (action === 'session' && req.method === 'GET') return res.status(200).json({owner: true});
+    const {s3, Bucket} = storage();
+    const prefix = 'loft-private/v1/' + uid + '/';
+    if (action === 'list' && req.method === 'GET') {
+      const token = req.query.cursor;
+      if (token && (typeof token !== 'string' || token.length > 4096)) throw new HttpError(400, 'Invalid cursor.');
+      const result = await s3.send(new ListObjectsV2Command({Bucket, Prefix: prefix + 'commits/', MaxKeys: 100, ContinuationToken: token || undefined}));
+      return res.status(200).json({items: (result.Contents || []).map(x => ({id: x.Key.slice((prefix+'commits/').length).replace(/\.json$/, ''), savedAt: x.LastModified})), cursor: result.NextContinuationToken || null});
+    }
+    const id = snapshotId(req.query.id);
+    const isPart = action === 'part';
+    if (!isPart && action !== 'commit') throw new HttpError(400, 'Unknown action.');
+    const key = prefix + (isPart ? 'parts/' + id + '/' + partId(req.query.part) : 'commits/' + id + '.json');
+    if (req.method === 'GET') {
+      const result = await s3.send(new GetObjectCommand({Bucket, Key: key}));
+      const body = await result.Body.transformToByteArray();
+      res.setHeader('Content-Type', isPart ? 'application/octet-stream' : 'application/json');
+      return res.status(200).send(Buffer.from(body));
+    }
+    if (req.method !== 'POST') throw new HttpError(405, 'Method not allowed.');
+    let body = req.body;
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch { throw new HttpError(400, 'Invalid JSON.'); } }
+    let bytes;
+    if (isPart) {
+      if (!body || typeof body.data !== 'string' || body.data.length > 1398104 || !/^[A-Za-z0-9+/]*={0,2}$/.test(body.data)) throw new HttpError(400, 'Invalid upload part.');
+      bytes = Buffer.from(body.data, 'base64');
+      if (bytes.length > 1048576) throw new HttpError(413, 'Upload part too large.');
+    } else {
+      if (!body || body.version !== 1 || !Array.isArray(body.records) || !Number.isInteger(body.parts) || body.parts < 0 || body.parts > 1000000) throw new HttpError(400, 'Invalid snapshot.');
+      bytes = Buffer.from(JSON.stringify(body));
+      if (bytes.length > 3000000) throw new HttpError(413, 'Snapshot metadata too large.');
+    }
+    await s3.send(new PutObjectCommand({Bucket, Key: key, Body: bytes, ContentType: isPart ? 'application/octet-stream' : 'application/json', CacheControl: 'private, no-store', IfNoneMatch: '*'}));
+    return res.status(201).json({saved: true});
+  } catch (err) {
+    const status = err.status || (err.$metadata && err.$metadata.httpStatusCode === 404 ? 404 : err.$metadata && err.$metadata.httpStatusCode === 412 ? 409 : 503);
+    return res.status(status).json({error: err.status ? err.message : status === 404 ? 'Snapshot or part not found.' : status === 409 ? 'This snapshot part already exists. Start a new upload.' : 'Cloud storage request failed. Check the R2 configuration and try again.'});
+  }
+};
