@@ -1,6 +1,11 @@
 /* Private cloud snapshots. Loaded only as public application code; credentials stay on the server. */
 (function () {
   'use strict';
+  const recoveryParams = new URLSearchParams(location.hash.slice(1));
+  if (recoveryParams.get('type') === 'recovery' || recoveryParams.has('error_description')) {
+    location.replace('/reset.html' + location.hash);
+    return;
+  }
   const stores = ['media', 'notes', 'contacts', 'chats'];
   let config, session, refreshing, busy = false;
   const apiURL = '/api/cloud';
@@ -172,7 +177,7 @@
   }
   function mount(root, bridge) {
     const section = node('section'); section.className = 'cloud-panel';
-    section.style.cssText = 'margin:16px;padding:18px;border:1px solid #8886;border-radius:16px;line-height:1.5';
+    section.style.cssText = 'margin:16px;padding:18px;border:1px solid #8886;border-radius:16px;line-height:1.5;color:var(--ink,#111);background:var(--card,#fff)';
     section.append(node('h2', 'Cloud Storage'), node('p', 'Save a private snapshot, then import it on another device. Sync is manual. Your local privacy lock stays separate.'));
     const status = node('p', session ? 'Signed in for this page session.' : 'Sign in with your app email and password.'); status.setAttribute('role', 'status'); status.style.overflowWrap = 'anywhere';
     const form = node('form'), email = node('input'), password = node('input'), signin = node('button', 'Sign in');

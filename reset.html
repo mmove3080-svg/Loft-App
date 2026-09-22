@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self' https://*.supabase.co; base-uri 'none'; form-action 'none'">
+<title>Reset cloud password — Loft</title>
+<style>
+:root {color-scheme:light dark;font-family:system-ui,sans-serif;background:#f4f4f6;color:#152238}body{margin:0;padding:24px}main{max-width:440px;margin:8vh auto;background:white;padding:28px;border-radius:18px;border:1px solid #c7ced7}h1{font-size:26px}p{line-height:1.6}label{display:block;margin-top:18px}input,button{box-sizing:border-box;width:100%;padding:13px;margin-top:8px;font:inherit;border:1px solid #a8b1bf;border-radius:8px}input{background:white;color:#152238}button{background:#1256b7;color:white;cursor:pointer}button:disabled{opacity:.6;cursor:wait}a{color:#1256b7}#status{overflow-wrap:anywhere}[hidden]{display:none!important}@media(prefers-color-scheme:dark){:root{background:#111;color:#f0f2f7}main{background:#202125;border-color:#555}input{background:#111;color:#fff}a{color:#8fc1ff}}
+</style>
+</head>
+<body><main>
+<h1>Reset cloud password</h1>
+<p>This changes your cloud login password. Your local passcode and saved records stay unchanged.</p>
+<p id="status" role="status">Checking recovery link…</p>
+<form id="reset" hidden>
+<label for="password">New cloud password</label><input id="password" type="password" autocomplete="new-password" minlength="12" required>
+<label for="confirm">Confirm new password</label><input id="confirm" type="password" autocomplete="new-password" minlength="12" required>
+<p>Use at least 12 characters and store it in your password manager.</p>
+<button id="save" type="submit">Save new password</button>
+</form>
+<p><a href="/">Return to your app</a></p>
+</main>
+<script>
+(async function(){
+'use strict';
+const status=document.getElementById('status'),form=document.getElementById('reset'),save=document.getElementById('save');
+const params=new URLSearchParams(location.hash.slice(1));
+let access=params.get('access_token'),config;
+history.replaceState(null,'','/reset.html');
+async function checked(response){
+ if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.msg||body.error_description||body.message||body.error||'The request failed. Request a fresh recovery link and try again.');}
+ return response;
+}
+try{
+ if(params.has('error_description'))throw new Error(params.get('error_description'));
+ if(params.get('type')!=='recovery'||!access)throw new Error('Open this page using a new password-recovery email. The link may be missing or expired.');
+ config=await(await checked(await fetch('/api/cloud?action=config',{cache:'no-store'}))).json();
+ if(!/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(config.url))throw new Error('Invalid login configuration.');
+ await checked(await fetch('/api/cloud?action=session',{headers:{Authorization:'Bearer '+access},cache:'no-store',signal:AbortSignal.timeout(30000)}));
+ form.hidden=false;status.textContent='Recovery link verified. Choose your new cloud password.';
+}catch(error){access=null;status.textContent=error.message;return;}
+form.addEventListener('submit',async event=>{
+ event.preventDefault();
+ const password=document.getElementById('password'),confirm=document.getElementById('confirm');
+ if(password.value.length<12){status.textContent='Use at least 12 characters.';return;}
+ if(password.value!==confirm.value){status.textContent='The two passwords do not match.';return;}
+ save.disabled=true;status.textContent='Saving your new password…';
+ try{
+  await checked(await fetch(config.url+'/auth/v1/user',{method:'PUT',headers:{apikey:config.publishableKey,Authorization:'Bearer '+access,'Content-Type':'application/json'},body:JSON.stringify({password:password.value}),cache:'no-store',signal:AbortSignal.timeout(30000)}));
+  const old=access;access=null;password.value='';confirm.value='';form.hidden=true;
+  status.textContent='Password updated. Return to the app, open Settings → Cloud Storage, and sign in with your email and new password.';
+  fetch(config.url+'/auth/v1/logout?scope=local',{method:'POST',headers:{apikey:config.publishableKey,Authorization:'Bearer '+old},signal:AbortSignal.timeout(10000)}).catch(()=>{});
+ }catch(error){status.textContent=error.message;save.disabled=false;}
+});
+})();
+</script></body></html>
