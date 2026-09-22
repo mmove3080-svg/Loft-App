@@ -125,6 +125,7 @@
     const prior = await new Promise((resolve, reject) => {const r = db.transaction('kv').objectStore('kv').get('cloud-import:' + id); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);});
     if (prior) throw new Error('This snapshot has already been imported on this device.');
     const manifest = await (await request('commit', {id})).json();
+    if(manifest.deleting)throw new Error('This backup is being deleted.');
     if (manifest.version !== 1 || !Array.isArray(manifest.records)) throw new Error('Unsupported snapshot.');
     const decoded = [];
     for (let i = 0; i < manifest.records.length; i++) {
@@ -204,23 +205,98 @@
     });};
     upload.onclick = () => run(() => save(bridge, progress));
     let cursor;
-    async function loadPage() {
-      const data = await (await request('list', cursor ? {cursor} : {})).json();
-      for (const item of data.items.sort((a,b) => String(b.savedAt).localeCompare(String(a.savedAt)))) {
-        const b = node('button', 'Import snapshot · ' + new Date(item.savedAt).toLocaleString());
-        b.style.cssText = 'display:block;padding:12px;margin:8px 0;font:inherit;width:100%';
-        b.onclick = () => run(async () => {
-          if (!confirm('Import this snapshot? Existing local data stays. Differing records are added as separate copies. Deletions are not applied.')) return;
-          await importSnapshot(bridge, item.id, progress);
-        }); snapshots.append(b);
-      }
-      cursor = data.cursor;
-      if (cursor) {const more = node('button', 'Load more snapshots'); more.onclick = () => run(async () => {more.remove(); await loadPage();}); snapshots.append(more);}
-      progress(snapshots.childElementCount ? 'Choose a snapshot to import. Imports preserve existing records.' : 'No saved snapshots yet.');
+    const objectURLs = new Set();
+    function clearPreviews(){for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
+    function button(text,fn,parent){const b=node('button',text);b.type='button';b.style.cssText='display:block;padding:12px;margin:8px 0;font:inherit;width:100%;border:1px solid #8888;border-radius:8px;background:var(--card,#fff);color:var(--ink,#111)';b.onclick=()=>run(fn);parent.append(b);return b;}
+    async function cleanup(id){
+      let next;
+      do {const r=await (await request('cleanup',{id},next?{cursor:next}:{})).json();next=r.cursor;}while(next);
     }
-    list.onclick = () => run(async () => {snapshots.textContent = ''; cursor = null; await loadPage();});
+    async function mediaBlob(id,info){
+      const chunks=[];
+      if(!info||!Array.isArray(info.parts)||!Number.isSafeInteger(info.size)||info.size<0)throw new Error('Invalid media information.');
+      for(const p of info.parts){const b=await (await request('part',{id,part:String(p.number)})).blob();if(await hash(b)!==p.hash)throw new Error('Media integrity check failed.');chunks.push(b);}
+      const b=new Blob(chunks,{type:info.type});if(b.size!==info.size)throw new Error('Incomplete media.');return b;
+    }
+    async function browse(item){
+      clearPreviews(); snapshots.textContent='';
+      const {manifest,revision}=await (await request('browse',{id:item.id})).json();
+      snapshots.append(node('h3','Backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
+      button('Back to saved snapshots',reload,snapshots);
+      if(manifest.deleting){snapshots.append(node('p','Deletion was started for this backup. Resume to finish removing its files.'));button('Resume deleting backup',()=>deleteBackup(item),snapshots);return;}
+      snapshots.append(node('p',manifest.records.length+' items. Browsing does not import anything. Deleting here affects only this backup. Copies on devices and in other backups remain.'));
+      const filter=node('select');filter.setAttribute('aria-label','Filter cloud items');filter.style.cssText='font:inherit;padding:10px;width:100%;background:var(--card,#fff);color:var(--ink,#111)';
+      for(const [value,label] of [['all','All items'],['media','Photos and videos'],['notes','Notes'],['contacts','Contacts'],['chats','Conversations']]){const o=node('option',label);o.value=value;filter.append(o);}
+      snapshots.append(filter);
+      const items=node('div');snapshots.append(items);let shown=0,selected=[];
+      const decoded=[];
+      for(let index=0;index<manifest.records.length;index++){
+        const r=manifest.records[index];
+        decoded.push({index,store:r.store,value:await decode(r.value,async info=>({cloudMedia:info}))});
+      }
+      async function page(){
+        const end=Math.min(shown+25,selected.length);
+        for(;shown<end;shown++){
+          const {index,store,value}=selected[shown], card=node('article');card.style.cssText='border:1px solid #8886;border-radius:12px;padding:12px;margin:12px 0;overflow-wrap:anywhere';
+          card.append(node('h4',value.name||value.title||(store==='notes'?String(value.text||'Untitled note').slice(0,80):store+' item')));
+          card.append(node('small',({media:'Photo / video',notes:'Note',contacts:'Contact',chats:'Conversation'})[store]||store));
+          if(store==='media'){
+            const info=value.blob&&value.blob.cloudMedia;
+            card.append(node('p',info?(info.size/1048576).toFixed(2)+' MB':'No media file'));
+            if(info)button('View photo / play video',async()=>{
+              progress('Loading selected media…');const blob=await mediaBlob(item.id,info);
+              const type=blob.type.startsWith('video/')?'video':blob.type.startsWith('image/')?'img':null;
+              if(!type)throw new Error('This media type cannot be previewed.');
+              const old=card.querySelector('img,video');if(old){URL.revokeObjectURL(old.src);objectURLs.delete(old.src);old.remove();}
+              const view=node(type),url=URL.createObjectURL(blob);objectURLs.add(url);view.src=url;view.style.cssText='display:block;max-width:100%;max-height:420px;margin:12px auto';
+              if(type==='video'){view.controls=true;view.preload='metadata';}else view.alt=value.name||'Cloud photo';
+              card.append(view);progress('Viewing cloud media. Nothing was imported.');
+            },card);
+          }else{
+            const text=node('pre');text.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:320px;overflow:auto';
+            text.textContent=store==='notes'?String(value.text||''):store==='contacts'?[value.name,value.number].filter(Boolean).join('\n'):(value.messages||[]).map(m=>(m.me?'You':value.name||'Contact')+' · '+new Date(m.ts).toLocaleString()+'\n'+String(m.text||'')).join('\n\n');
+            card.append(text);
+          }
+          button('Delete item from this backup',async()=>{
+            if(!confirm('Permanently delete this item from THIS backup? Other backups and local device copies remain. A future save can upload the local copy again.'))return;
+            await request('remove-record',{id:item.id},{revision,index});
+            let warning='';try{progress('Removing unused media files…');await cleanup(item.id);}catch{warning=' The item was removed, but unused media cleanup is unfinished. Use Clean unused media to retry.';}
+            await browse(item);progress('Item deleted from this backup. Local copies and other backups remain.'+warning);
+          },card);
+          items.append(card);
+        }
+        if(shown<selected.length){const more=button('Show more items',async()=>{more.remove();await page();},items);}
+      }
+      async function applyFilter(){clearPreviews();items.textContent='';shown=0;selected=decoded.filter(x=>filter.value==='all'||x.store===filter.value);if(!selected.length)items.append(node('p','No items in this category.'));await page();}
+      filter.onchange=()=>run(applyFilter);await applyFilter();
+      button('Clean unused media',async()=>{await cleanup(item.id);progress('Unused media removed from this backup.');},snapshots);
+      button('Delete entire backup',()=>deleteBackup(item),snapshots);
+      progress('Browsing '+manifest.records.length+' cloud items. No local data changed.');
+    }
+    async function deleteBackup(item){
+      if(!confirm('Permanently delete this ENTIRE cloud backup and its media? Local device copies and other backups remain. This cannot be undone.'))return;
+      const {revision}=await (await request('browse',{id:item.id})).json();
+      let done=false;
+      while(!done){progress('Deleting backup files… Keep this page open. If interrupted, use Delete entire backup again to resume.');done=(await (await request('delete-snapshot',{id:item.id},{revision})).json()).done;}
+      await reload();progress('Cloud backup deleted. Local copies and other backups remain.');
+    }
+    async function loadPage(){
+      const data=await (await request('list',cursor?{cursor}:{})).json();
+      for(const item of data.items.sort((a,b)=>String(b.savedAt).localeCompare(String(a.savedAt)))){
+        const card=node('article');card.style.cssText='border:1px solid #8886;border-radius:12px;padding:12px;margin:12px 0';
+        card.append(node('h3','Backup · last saved or changed '+new Date(item.savedAt).toLocaleString()));
+        button('Browse contents',()=>browse(item),card);
+        button('Import snapshot',async()=>{if(confirm('Import this snapshot? Existing local data stays. Differing records are added as separate copies. Deletions are not applied.'))await importSnapshot(bridge,item.id,progress);},card);
+        button('Delete entire backup',()=>deleteBackup(item),card);snapshots.append(card);
+      }
+      cursor=data.cursor;
+      if(cursor){const more=button('Load more snapshots',async()=>{more.remove();await loadPage();},snapshots);}
+      progress(snapshots.childElementCount?'Choose a snapshot to browse, import or delete.':'No saved snapshots yet.');
+    }
+    async function reload(){clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
+    list.onclick=()=>run(reload);
     logout.onclick = () => run(async () => {
-      const old = session; session = null; snapshots.textContent = '';
+      const old = session; session = null; clearPreviews(); snapshots.textContent = '';
       if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
       progress('Signed out on this page. Local records are still available behind your local privacy lock.');
     });

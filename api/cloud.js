@@ -1,6 +1,7 @@
 'use strict';
 const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command} = require('@aws-sdk/client-s3');
 const {HttpError, settings, owner, snapshotId, partId} = require('../lib/security');
+const {manage} = require('../lib/snapshots');
 let client;
 function storage() {
   const e = process.env;
@@ -29,12 +30,19 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({items: (result.Contents || []).map(x => ({id: x.Key.slice((prefix+'commits/').length).replace(/\.json$/, ''), savedAt: x.LastModified})), cursor: result.NextContinuationToken || null});
     }
     const id = snapshotId(req.query.id);
+    if (['browse','remove-record','cleanup','delete-snapshot'].includes(action)) {
+      if (req.method !== (action === 'browse' ? 'GET' : 'POST')) throw new HttpError(405, 'Method not allowed.');
+      let body=req.body || {};
+      if(typeof body==='string'){try{body=JSON.parse(body);}catch{throw new HttpError(400,'Invalid JSON.');}}
+      return res.status(200).json(await manage({s3,Bucket,prefix,id,action,body}));
+    }
     const isPart = action === 'part';
     if (!isPart && action !== 'commit') throw new HttpError(400, 'Unknown action.');
     const key = prefix + (isPart ? 'parts/' + id + '/' + partId(req.query.part) : 'commits/' + id + '.json');
     if (req.method === 'GET') {
       const result = await s3.send(new GetObjectCommand({Bucket, Key: key}));
       const body = await result.Body.transformToByteArray();
+      if (!isPart && JSON.parse(Buffer.from(body).toString()).deleting) throw new HttpError(409, 'This backup is being deleted.');
       res.setHeader('Content-Type', isPart ? 'application/octet-stream' : 'application/json');
       return res.status(200).send(Buffer.from(body));
     }
@@ -55,6 +63,6 @@ module.exports = async function handler(req, res) {
     return res.status(201).json({saved: true});
   } catch (err) {
     const status = err.status || (err.$metadata && err.$metadata.httpStatusCode === 404 ? 404 : err.$metadata && err.$metadata.httpStatusCode === 412 ? 409 : 503);
-    return res.status(status).json({error: err.status ? err.message : status === 404 ? 'Snapshot or part not found.' : status === 409 ? 'This snapshot part already exists. Start a new upload.' : 'Cloud storage request failed. Check the R2 configuration and try again.'});
+    return res.status(status).json({error: err.status ? err.message : status === 404 ? 'Snapshot or part not found.' : status === 409 ? 'This backup changed or the part already exists. Refresh and try again.' : 'Cloud storage request failed. Check the R2 configuration and try again.'});
   }
 };
