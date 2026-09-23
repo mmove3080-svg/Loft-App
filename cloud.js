@@ -47,6 +47,7 @@
     }));
   }
   async function hash(blob) {
+    if(window.LoftHash)return window.LoftHash(blob);
     return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), x => x.toString(16).padStart(2, '0')).join('');
   }
   function base64(bytes) {
@@ -88,8 +89,8 @@
     return new Promise((resolve, reject) => {
       const tx = db.transaction(stores, 'readonly'), records = [];
       for (const store of stores) {
-        const r = tx.objectStore(store).getAll();
-        r.onsuccess = () => {for (const value of r.result) records.push({store, value});};
+        const r = tx.objectStore(store).openCursor();
+        r.onsuccess = () => {const c=r.result;if(c){records.push({store,value:c.value});c.continue();}};
       }
       tx.oncomplete = () => resolve(records);
       tx.onerror = tx.onabort = () => reject(tx.error || new Error('Could not read local data.'));
@@ -184,7 +185,7 @@
     const db=await auto.bridge.openDB();if(!db)throw new Error('Local database unavailable. Sync paused.');
     return new Promise((resolve,reject)=>{
       const tx=db.transaction([...stores,'kv'],'readonly'),records=[],state={base:{}};let revision=0;
-      for(const store of stores){const r=tx.objectStore(store).getAll();r.onsuccess=()=>{for(const value of r.result)records.push({store,value});};}
+      for(const store of stores){const r=tx.objectStore(store).openCursor();r.onsuccess=()=>{const c=r.result;if(c){records.push({store,value:c.value});c.continue();}};}
       const rev=tx.objectStore('kv').get('sync-local-revision');rev.onsuccess=()=>{revision=rev.result||0;};
       const b=tx.objectStore('kv').get('sync-base-v1');b.onsuccess=()=>{state.base=b.result||{};};
       tx.oncomplete=()=>resolve({db,records,revision,base:state.base});tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not read sync state.'));

@@ -1,149 +1,70 @@
-# Loft: complete Cloud Library update
+# Loft redesign — start here
 
-This package upgrades your existing Loft-App repository. It preserves the current
-local database and existing R2 snapshots. Upload the CONTENTS of this folder into
-the repository root. Keep your existing icons, photos and manifest.webmanifest.
-Do not replace the repository with an empty folder, clear site data, or delete
-existing app files.
+This is an update for your existing Loft-App GitHub repository. It is ready for a **preview deployment and your phone check**. It has not been uploaded or deployed for you.
 
-## What is included
+## Upload the update
 
-- A Home cloud-status button that opens a dedicated Cloud Library.
-- Collection, Trash, Backups and Storage navigation.
-- Search across cloud filenames, note text, contact details and conversation text;
-  category filters, name/date sorting and paginated cards.
-- Thumbnail cards where stored thumbnails are available, large image/video
-  previews, keyboard-accessible controls and light/dark theme support.
-- Original photo/video downloads; text and JSON record exports. The bulk matching
-  export contains text records and media metadata, NOT the original media bytes.
-  Download original media from individual cards.
-- Storage totals for your app's R2 prefix, separated into sync/Trash, backups and
-  other files; browser storage estimates where supported. These are not billing
-  totals or a Cloudflare account-wide quota.
-- Server-controlled 30-day Trash for deleted synced records, restoration, explicit
-  permanent deletion, and daily scheduled expiry with resumable media cleanup.
-- Existing snapshot save/import/browse/delete, local privacy lock, password reset,
-  automatic sync and conflict resolution remain available.
+1. Download and extract `loft-redesign.zip` using Windows **Extract All**.
+2. Open the extracted `loft-redesign` folder. You should see `index.html`, `refined.css`, `cloud.js`, the new media/notes scripts, and the `api`, `lib`, and `tests` folders.
+3. On GitHub, open **mmove3080-svg / Loft-App**, then **Add file → Upload files**.
+4. Drag the **contents inside** `loft-redesign` into GitHub. Do not upload the outer folder or the ZIP.
+5. Check that `index.html`, `photos-ui.js`, `media-store.js`, `media-export.js`, `notes-ui.js`, `refined.css`, `sha256.js`, `integrity.js`, `hash-worker.js`, and `sw.js` are at the repository root. Keep `api` and `lib` as folders.
+6. Prefer **Create a new branch** for this upload so Vercel can build a preview. Check it before merging into `main` for production. If your normal workflow commits straight to `main`, that updates the live app immediately.
+7. Leave your existing icons, photos, manifest, and other repository files in place. This ZIP does not replace those assets.
 
-## 1. Keep a backup
+No new Vercel environment variable is required. Keep your working Supabase, R2, owner ID, and CRON_SECRET values. The daily `/api/cleanup` schedule remains in `vercel.json`.
 
-On the device containing your latest data, sign in and choose Save snapshot.
-Wait for the success message. The update does not clear IndexedDB.
+## First look
 
-## 2. Add the new Vercel secret BEFORE committing the update
+Open the preview. Close and reopen its tab once if it initially shows the previous interface. **Do not clear browser/site data** to refresh it: that can delete originals which exist only on this device.
 
-Open Vercel > loft-app > Settings > Environments > Production.
-Under Environment Variables, choose Add Environment Variable.
+The Home screen follows your reference layout: Calculator/Settings above the clock/calendar, a wide photo widget, and the four-icon dock. The extra status time and simulated battery widget are hidden. The compact Cloud button remains your sync shortcut.
 
-- Type: Secret
-- Key: CRON_SECRET
-- Value: a newly generated random secret of at least 32 characters
-- Environment: Production
-- Note: optional; you can enter "Daily Trash cleanup"
+Settings now has a **Cloud Library** entry for account, sync, backups, Trash, and storage. Sign in there using your working cloud email/password. A preview URL has separate browser storage from the production URL; it will not automatically show your production device's local files.
 
-Use your password manager's generator for a 48-character random value, or generate
-one on your own Windows computer with PowerShell:
+## Photos
 
-```powershell
-$cleanupBytes = New-Object byte[] 32
-$cleanupRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-$cleanupRng.GetBytes($cleanupBytes)
-$cleanupRng.Dispose()
-[Convert]::ToBase64String($cleanupBytes) | Set-Clipboard
-```
+- **Select** is at the top-left; **+** is at the top-right, each with a comfortable touch target.
+- Search filenames or filter Photos/Videos.
+- Select all works on the current filtered results. The count is shown above the grid.
+- Long-press/right-click a tile enters selection. **Done** exits it.
+- Open an image; swipe horizontally, use Previous/Next, or use arrow keys. Pinch, double-tap, or tap Zoom. Drag to pan when zoomed.
+- Videos use the browser's playback controls and Previous/Next buttons, keeping playback gestures separate from photo swipes.
+- Download and Share use the original file. If the browser cannot preview a format such as some HEIC/MOV variants, download it to a compatible viewer.
 
-That copies the secret to your clipboard. Paste it directly into Vercel's Value
-field and click Save. Do not paste it into GitHub, JavaScript, chat or screenshots.
-Keep all existing R2 and Supabase environment variables. Your existing
-APP_OWNER_USER_ID determines the only account the cleanup can access.
+### Large imports
 
-## 3. Upload and deploy
+The queue stores each unchanged original separately, reports saved/duplicate/failed counts, and creates thumbnails lazily for visible tiles. One failed file does not discard files already saved.
 
-1. Extract this ZIP on Windows.
-2. Open your GitHub Loft-App repository, on main, at the root.
-3. Choose Add file > Upload files.
-4. Upload everything INSIDE the extracted loft-improvements folder, including
-   api, lib and tests. Do not upload the enclosing folder or the ZIP itself.
-5. Commit with a message such as "Add Cloud Library and 30-day Trash".
-6. Wait for the new Vercel production deployment to show Ready.
-7. Reload the app. Close and reopen old app tabs on ALL devices to load the new
-   cached public files. Do not clear browser storage. Sign in again if asked.
+Use **Stop import** to stop after the current file. Use **Retry failed files** while the page is open, or reselect the batch after reopening. Files with the same name, size and modification time are compared byte-for-byte before skipping. A previous interrupted job is reported when you reopen Photos. Browsers cannot retain your permission to arbitrary selected files across reloads, so unfinished files must be reselected.
 
-The schedule is already included in vercel.json. You do not need to create a
-second cron job manually. It calls /api/cleanup daily, scheduled for 03:00 UTC.
-Vercel Hobby may invoke it during the following hour. The app need not be open.
+If device storage fills, importing stops with a message. Space and format support depend on the browser/device. Keep the page open during a large import; iOS can suspend or terminate background pages. Auto sync waits while importing or editing, then resumes on Home or Cloud Library.
 
-## 4. Check the deployment and scheduled cleanup
+### Export selected originals
 
-In Vercel Project Settings, open Cron Jobs. Confirm /api/cleanup appears with
-schedule `0 3 * * *`. You can use its Run control to test it, then inspect Logs.
-A successful request returns 200 and logs an expired count, batches and done.
-Running cleanup early does not shorten anyone's 30-day recovery period.
+Supported desktop browsers let you choose a folder and stream originals there. Each file goes into a numbered subfolder, keeping duplicate filenames distinct.
 
-- 401: CRON_SECRET is missing, too short or did not reach the deployment. Check
-  the Production variable and redeploy. Do not reveal its value.
-- 409: concurrent cloud activity won a conditional write; the next run can retry.
-- 503: cleanup did not finish; inspect the function logs/R2 configuration.
-- done=false: more media remains. Further sync cleanup or the next daily run
-  continues. A large backlog or outage can delay physical file removal.
+Other browsers download one uncompressed ZIP, limited to **512 MiB per batch**. This avoids attempting an unbounded in-memory archive on mobile. Select smaller batches for larger libraries, or use folder export on a supporting desktop browser. No export resizes or recompresses original media.
 
-Opening /api/cleanup in your browser without the secret should return 401.
-That is expected and is not a reason to expose the secret in a URL.
-Vercel does not automatically retry a failed cron invocation immediately; this
-implementation retries remaining work during future scheduled runs.
+## Notes, Phone and Messages
 
-## 5. Test with one disposable note
+Notes has search, pinning, archive, checklists, simple portable text formatting and a Preview button. It saves after typing pauses and before leaving the app; save failures are shown instead of pretending success. Never close the browser while it reports an unsaved note.
 
-1. Open Cloud Library using the new Home status button and sign in.
-2. Enable sync if needed. Create a note named "Trash test", return to Home or
-   Cloud Library and wait for Up to date.
-3. In Collection, search for "Trash test", then select Move to Trash.
-4. Open Trash. Confirm the recovery deadline appears.
-5. Choose Restore item. Confirm the note returns to Collection and, after sync,
-   to the Notes app on your devices.
-6. Try a photo preview and Download original. Check Storage and an existing backup.
-7. Only if you want to test permanent deletion, use the disposable note. Choose
-   Delete permanently from Trash and confirm. This cannot be undone from Trash.
+Phone has larger dial keys, contact search and a clear link to the device's actual dialer. It does not simulate a connected call.
 
-## Retention and data boundaries
+Messages remains a private conversation notebook, not a messaging network. It preserves drafts, supports original-file attachments and timestamps, and loads older messages in batches. It does not send SMS or deliver messages to another person.
 
-The 30 days start when the server accepts the deletion of a synced item, using
-server time. An offline deletion reaches Trash when that device next syncs.
-A local item that has NEVER been uploaded cannot be recovered from cloud Trash.
-Old deletions made before this update cannot be reconstructed automatically.
+## Device checks before production
 
-Restoring a Trash item returns it to the current synced collection. Enabled
-online devices receive it on a later sync; concurrent offline edits may still
-need your conflict choice. Expired entries cannot be restored, even if their
-physical files are waiting for the next cleanup run.
+See `VALIDATION.md` for checks completed in this environment. A real browser could not be installed here; **visual rendering, iPhone Safari/PWA interactions and video codec playback still need device testing**.
 
-The server retains minimal deletion markers (store and ID, without content) so
-stale devices cannot silently resurrect old records. File removal is conditional
-on media no longer being referenced by active or recoverable records. Cleanup
-can run repeatedly or stop partway and resume.
+1. On a phone, open Photos: tap Select and +, then import a small photo/video mix.
+2. Scroll, select, open an image, pinch, swipe, and play a video. Rotate the phone.
+3. Download one original and check its bytes/file size against the source.
+4. Create a note, edit a checklist, switch Home, and reopen it. Test with the keyboard visible.
+5. Create a conversation draft, leave and return, then attach/download a small file.
+6. Open Cloud Library and confirm your usual sync, backups, Trash and restore.
+7. Repeat the key steps in Safari and an iOS Home Screen/PWA installation. Check the top controls and Home button near safe areas.
+8. Start with 100 representative files, then try a larger batch within your device's storage quota. The automated 2,100-file test used tiny fixtures; it does not establish performance for thousands of large videos on an iPhone.
 
-Backups remain separate. Deleting from Trash does NOT scrub copies from older
-snapshots or exported files. Backup item/whole-backup deletion is still explicitly
-PERMANENT. Items can also exist on devices that have paused sync or are offline.
-No claim is made that all independent copies are erased.
-
-Automatic device sync still runs while the page is open, signed in and on Home,
-Cloud Library or Settings. The SERVER cleanup alone runs with the app closed.
-Sign-in sessions stay in memory; reopening the app may require signing in again.
-
-## Validation and limits
-
-28 automated server/security/cache/sync tests passed, plus simulated browser and
-IndexedDB checks of two-device sync, offline/conflicting edits, concurrent local
-changes, snapshot integrity/import, media browsing, search, downloads, exports,
-Trash/restore and storage totals. Tests used mock cloud storage, not your private
-production data. A real-browser visual review and your live deployment test are
-still needed.
-
-Existing limits remain: 10,000 sync entries including deletion markers; 3 MB sync
-metadata including Trash; media uses 1 MiB parts. Large videos/downloads require
-browser memory. Thumbnail cards use existing thumbnails, and show a placeholder
-when none is stored. This release does not introduce background mobile sync,
-end-to-end encryption or a generic JSON-export importer.
-
-For developers: run npm ci, then npm test. The test dependencies are unchanged.
+If something looks wrong, send the screen and describe the action. Keep the previous deployment available in Vercel for rollback. The existing IndexedDB database name, version and stores are unchanged; this update does not erase or migrate your content.
