@@ -799,8 +799,11 @@ function layout(){
   // The scroller excludes the Cloud button, dock and safe-area padding.
   var board=document.getElementById('springboard'),style=getComputedStyle(board);
   var available=(board.clientHeight||Math.max(0,vh-240))-(parseFloat(style.paddingTop)||0)-(parseFloat(style.paddingBottom)||0);
-  var col=Math.max(56,Math.min((sw-side*2-gap*3)/4,(available-gap*5)/(6*.965)));
-  r.setProperty('--colw',col+'px');r.setProperty('--rowh',(col*.965)+'px');
+  var appHeight=icon+34;
+  var widgetHeight=Math.max(96,Math.min((sw-side*2-gap)/2,(available-appHeight-gap*2)/2));
+  var col=(widgetHeight-gap)/2;
+  r.setProperty('--app-row',appHeight+'px');
+  r.setProperty('--colw',col+'px');r.setProperty('--rowh',widgetHeight+'px');
   r.setProperty('--r-widget',Math.round(col*.3)+'px');
   placeWidgets();LAYOUT.sw=sw;
   var v=window.visualViewport;
@@ -808,7 +811,7 @@ function layout(){
 }
 function placeWidgets(){
   function set(id,c,r,cs,rs){var e=document.getElementById(id);e.style.gridColumn=c+' / span '+cs;e.style.gridRow=r+' / span '+rs;}
-  set('w-apps',1,1,4,2);set('w-clock',1,3,2,2);set('w-cal',3,3,2,2);set('w-photos',1,5,4,2);
+  set('w-apps',1,1,4,1);set('w-clock',1,2,2,1);set('w-cal',3,2,2,1);set('w-photos',1,3,4,1);
 }
 var lt;
 function onResize(){ clearTimeout(lt); lt=setTimeout(layout,60) }
