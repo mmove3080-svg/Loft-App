@@ -568,7 +568,6 @@ button.set-row:active{background:rgba(120,120,128,.12)}
     <div id="status"><span id="clocktext">--:--</span></div>
 
     <div id="springboard">
-      <button id="home-cloud-status" data-open="cloud" aria-label="Open Cloud Library and sync status">Cloud · Sign in to sync</button>
       <div id="grid">
         <!-- Calculator + Settings (this row replaced the Weather widget) -->
         <div class="gridapps" id="w-apps">
@@ -627,6 +626,7 @@ button.set-row:active{background:rgba(120,120,128,.12)}
       </div>
     </div>
 
+      <button id="home-cloud-status" data-open="cloud" aria-label="Open Cloud Library and sync status">Cloud · Sign in to sync</button>
     <div id="dockwrap"><div id="dock" role="list"></div></div>
     <div id="homebar"><i></i></div>
   </div>
@@ -791,12 +791,17 @@ var LAYOUT={mode:null,landscape:false,sw:400};
 function layout(){
   var vw=window.innerWidth,vh=window.innerHeight;
   var sw=Math.min(vw,580),gap=Math.round(sw*.036),side=Math.round(sw*.08);
-  var col=Math.max(56,Math.min((sw-side*2-gap*3)/4,(vh-210-gap*5)/6));
   var icon=Math.min(76,sw*.155),r=document.documentElement.style;
   r.setProperty('--sw',sw+'px');r.setProperty('--cols',4);r.setProperty('--gap',gap+'px');
-  r.setProperty('--colw',col+'px');r.setProperty('--rowh',(col*.965)+'px');r.setProperty('--icon',icon+'px');
+  r.setProperty('--icon',icon+'px');
   r.setProperty('--dockgap',Math.round(sw*.052)+'px');r.setProperty('--side',side+'px');
-  r.setProperty('--statush','0px');r.setProperty('--homebar','24px');r.setProperty('--r-widget',Math.round(col*.3)+'px');
+  r.setProperty('--statush','0px');r.setProperty('--homebar','24px');
+  // The scroller excludes the Cloud button, dock and safe-area padding.
+  var board=document.getElementById('springboard'),style=getComputedStyle(board);
+  var available=(board.clientHeight||Math.max(0,vh-240))-(parseFloat(style.paddingTop)||0)-(parseFloat(style.paddingBottom)||0);
+  var col=Math.max(56,Math.min((sw-side*2-gap*3)/4,(available-gap*5)/(6*.965)));
+  r.setProperty('--colw',col+'px');r.setProperty('--rowh',(col*.965)+'px');
+  r.setProperty('--r-widget',Math.round(col*.3)+'px');
   placeWidgets();LAYOUT.sw=sw;
   var v=window.visualViewport;
   r.setProperty('--viewport-height',(v?v.height:vh)+'px');r.setProperty('--viewport-top',(v?v.offsetTop:0)+'px');
