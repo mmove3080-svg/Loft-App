@@ -3,15 +3,7 @@ const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command} = req
 const {HttpError, settings, owner, snapshotId, partId} = require('../lib/security');
 const {manage} = require('../lib/snapshots');
 const {syncIndex} = require('../lib/sync');
-let client;
-function storage() {
-  const e = process.env;
-  if (!e.R2_ENDPOINT || !e.R2_ACCESS_KEY_ID || !e.R2_SECRET_ACCESS_KEY || !e.R2_BUCKET_NAME) throw new HttpError(503, 'R2 storage is not configured.');
-  const endpoint = new URL(e.R2_ENDPOINT);
-  if (endpoint.protocol !== 'https:' || !endpoint.hostname.endsWith('.r2.cloudflarestorage.com') || endpoint.pathname !== '/' || endpoint.search || endpoint.username || endpoint.password) throw new HttpError(503, 'Check R2_ENDPOINT: use the account S3 endpoint without a bucket path.');
-  if (!client) client = new S3Client({region: e.R2_REGION || 'auto', endpoint: e.R2_ENDPOINT, credentials: {accessKeyId: e.R2_ACCESS_KEY_ID, secretAccessKey: e.R2_SECRET_ACCESS_KEY}});
-  return {s3: client, Bucket: e.R2_BUCKET_NAME};
-}
+const {storage}=require('../lib/storage');
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('Vercel-CDN-Cache-Control', 'no-store');
@@ -24,16 +16,28 @@ module.exports = async function handler(req, res) {
     if (action === 'session' && req.method === 'GET') return res.status(200).json({owner: true});
     const {s3, Bucket} = storage();
     const prefix = 'loft-private/v1/' + uid + '/';
+    if(action==='storage-usage'&&req.method==='GET'){
+      const cursor=req.query.cursor;
+      if(cursor&&(typeof cursor!=='string'||cursor.length>4096))throw new HttpError(400,'Invalid cursor.');
+      const page=await s3.send(new ListObjectsV2Command({Bucket,Prefix:prefix,MaxKeys:1000,ContinuationToken:cursor||undefined}));
+      const totals={sync:0,backups:0,other:0,objects:0};
+      for(const file of page.Contents||[]){
+        if(!file.Key.startsWith(prefix))throw new HttpError(503,'Unexpected storage response.');
+        const path=file.Key.slice(prefix.length);
+        totals[path.startsWith('sync/')?'sync':/^(parts|commits)\//.test(path)?'backups':'other']+=file.Size||0;totals.objects++;
+      }
+      return res.status(200).json({totals,cursor:page.NextContinuationToken||null});
+    }
     if (action === 'list' && req.method === 'GET') {
       const token = req.query.cursor;
       if (token && (typeof token !== 'string' || token.length > 4096)) throw new HttpError(400, 'Invalid cursor.');
       const result = await s3.send(new ListObjectsV2Command({Bucket, Prefix: prefix + 'commits/', MaxKeys: 100, ContinuationToken: token || undefined}));
       return res.status(200).json({items: (result.Contents || []).map(x => ({id: x.Key.slice((prefix+'commits/').length).replace(/\.json$/, ''), savedAt: x.LastModified})), cursor: result.NextContinuationToken || null});
     }
-    if(action==='sync-index'||action==='sync-cleanup'){
+    if(['sync-index','sync-cleanup','trash-restore','trash-purge'].includes(action)){
       let body=req.body;
       if(typeof body==='string'){try{body=JSON.parse(body);}catch{throw new HttpError(400,'Invalid JSON.');}}
-      return res.status(200).json(await syncIndex({s3,Bucket,prefix,method:req.method,body,cleanup:action==='sync-cleanup'}));
+      return res.status(200).json(await syncIndex({s3,Bucket,prefix,method:req.method,body,cleanup:action==='sync-cleanup',operation:action==='trash-restore'?'restore':action==='trash-purge'?'purge':undefined}));
     }
     const id = snapshotId(req.query.id);
     if (['browse','remove-record','cleanup','delete-snapshot'].includes(action)) {

@@ -271,7 +271,7 @@
     auto.bridge=bridge;
     const section = node('section'); section.className = 'cloud-panel';
     section.style.cssText = 'margin:16px;padding:18px;border:1px solid #8886;border-radius:16px;line-height:1.5;color:var(--ink,#111);background:var(--card,#fff)';
-    section.append(node('h2', 'Cloud Storage'), node('p', 'Automatic sync shares your current data between enabled devices. Dated snapshots remain separate backups. Your local privacy lock stays separate.'));
+    section.append(node('h2', bridge.library?'Cloud Library':'Cloud Storage'), node('p', 'Automatic sync shares your current data between enabled devices. Dated snapshots remain separate backups. Your local privacy lock stays separate.'));
     const status = node('p', session ? 'Signed in for this page session.' : 'Sign in with your app email and password.'); status.setAttribute('role', 'status'); status.style.overflowWrap = 'anywhere';
     const form = node('form'), email = node('input'), password = node('input'), signin = node('button', 'Sign in');
     email.type = 'email'; email.placeholder = 'Email address'; email.autocomplete = 'username'; email.required = true; email.setAttribute('aria-label', 'Email address');
@@ -293,13 +293,15 @@
       progress('Signing in…');
       try {session = await auth('password', {email: email.value.trim(), password: password.value}); await request('session');}
       catch (e) {session = null; throw e;} finally {password.value = '';}
-      progress('Signed in. You can now save or import snapshots.');
+      progress('Signed in. Your cloud library is ready.');
+      syncStatus(auto.enabled?'Automatic sync enabled.':'Automatic sync is off.');
+      if(bridge.library)await browse({sync:true});
       setTimeout(()=>{tick(true).catch(()=>{});},0);
     });};
     upload.onclick = () => run(() => save(bridge, progress));
     let cursor;
     const objectURLs = new Set();
-    function clearPreviews(){for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
+    function clearPreviews(){for(const dialog of document.querySelectorAll('dialog[data-loft-preview]')){if(dialog.close)dialog.close();else dialog.remove();}for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
     function button(text,fn,parent){const b=node('button',text);b.type='button';b.style.cssText='display:block;padding:12px;margin:8px 0;font:inherit;width:100%;border:1px solid #8888;border-radius:8px;background:var(--card,#fff);color:var(--ink,#111)';b.onclick=()=>run(fn);parent.append(b);return b;}
     async function cleanup(id){
       let next;
@@ -311,67 +313,121 @@
       for(const p of info.parts){const b=await (await request('part',{id,part:String(p.number)})).blob();if(await hash(b)!==p.hash)throw new Error('Media integrity check failed.');chunks.push(b);}
       const b=new Blob(chunks,{type:info.type});if(b.size!==info.size)throw new Error('Incomplete media.');return b;
     }
+    const bytesLabel=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(2)+' GB';
+    function download(blob,name){
+      const url=URL.createObjectURL(blob),a=node('a');a.href=url;a.download=String(name||'download').replace(/[\\/\x00-\x1f]/g,'_');document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    }
+    function recordText(store,value){
+      return store==='notes'?String(value.text||''):store==='contacts'?[value.name,value.number].filter(Boolean).join('\n'):(value.messages||[]).map(m=>(m.me?'You':value.name||'Contact')+' · '+new Date(m.ts).toLocaleString()+'\n'+String(m.text||'')).join('\n\n');
+    }
+    function viewer(blob,name){
+      const dialog=node('dialog');dialog.dataset.loftPreview='true';dialog.className='loft-viewer';
+      const close=node('button','Close preview');close.type='button';close.onclick=()=>dialog.close();
+      const title=node('h3',name||'Media preview');dialog.append(close,title);
+      const media=node(blob.type.startsWith('video/')?'video':'img'),url=URL.createObjectURL(blob);media.src=url;
+      if(media.tagName==='VIDEO'){media.controls=true;media.preload='metadata';}else media.alt=name||'Cloud image';
+      dialog.append(media);document.body.append(dialog);
+      dialog.addEventListener('close',()=>{if(media.pause)media.pause();URL.revokeObjectURL(url);dialog.remove();},{once:true});
+      if(dialog.showModal)dialog.showModal();else{dialog.setAttribute('open','');close.onclick=()=>{URL.revokeObjectURL(url);dialog.remove();};}
+    }
+    async function storageOverview(){
+      libraryView++;
+      clearPreviews();snapshots.textContent='';snapshots.append(node('h3','Storage overview'));
+      const summary=node('p','Calculating your cloud storage…');snapshots.append(summary);
+      const total={sync:0,backups:0,other:0,objects:0};let next;
+      do{const r=await(await request('storage-usage',next?{cursor:next}:{})).json();for(const k in total)total[k]+=r.totals[k];next=r.cursor;summary.textContent='Counted '+total.objects+' files…';}while(next);
+      summary.textContent='Your app uses '+bytesLabel(total.sync+total.backups+total.other)+' in cloud storage.';
+      const grid=node('div');grid.className='library-stats';
+      for(const [label,n] of [['Synced data and Trash',total.sync],['Saved backups',total.backups],['Other app files',total.other]]){const card=node('article');card.append(node('strong',bytesLabel(n)),node('p',label));grid.append(card);}snapshots.append(grid);
+      snapshots.append(node('p','Includes stored metadata, thumbnails and media awaiting cleanup. This is your app’s usage, not a Cloudflare billing estimate. A changing collection can affect the count.'));
+      if(navigator.storage&&navigator.storage.estimate){const local=await navigator.storage.estimate();snapshots.append(node('p','This browser uses about '+bytesLabel(local.usage||0)+' of '+bytesLabel(local.quota||0)+' available to this site. This includes offline records and app files.'));}
+      progress('Storage overview updated.');
+    }
+    let libraryView=0;
     async function browse(item){
-      clearPreviews(); snapshots.textContent='';
-      const data=await (await (item.sync?request('sync-index'):request('browse',{id:item.id}))).json();
-      const active=item.sync?data.entries.filter(e=>!e.deleted):null;
+      const viewId=++libraryView;
+      clearPreviews();snapshots.textContent='';progress('Loading library…');
+      const data=await(await(item.sync?request('sync-index'):request('browse',{id:item.id}))).json();
+      const active=item.sync?(item.trash?data.trash||[]:data.entries.filter(e=>!e.deleted)):null;
       const manifest=item.sync?{records:active.map(e=>({store:e.store,value:e.value})),createdAt:Date.now()}:data.manifest,revision=data.revision;
-      snapshots.append(node('h3',item.sync?'Current synced collection':'Backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
-      button('Back to saved snapshots',reload,snapshots);
-      if(manifest.deleting){snapshots.append(node('p','Deletion was started for this backup. Resume to finish removing its files.'));button('Resume deleting backup',()=>deleteBackup(item),snapshots);return;}
-      snapshots.append(node('p',manifest.records.length+(item.sync?' synced items. Deletions here apply to enabled devices on their next sync. Older snapshots remain unchanged.':' items. Browsing does not import anything. Deleting here affects only this backup. Copies on devices and in other backups remain.')));
-      const filter=node('select');filter.setAttribute('aria-label','Filter cloud items');filter.style.cssText='font:inherit;padding:10px;width:100%;background:var(--card,#fff);color:var(--ink,#111)';
+      snapshots.append(node('h3',item.trash?'Trash · 30-day recovery':item.sync?'Your cloud collection':'Saved backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
+      if(manifest.deleting){snapshots.append(node('p','This backup is being deleted.'));button('Resume deleting backup',()=>deleteBackup(item),snapshots);return;}
+      snapshots.append(node('p',item.trash?'Restore items before their recovery deadline. Expired items are removed during scheduled cleanup. Older backups are separate.':item.sync?'Search and browse your synced photos, videos, notes, contacts and conversations. Deleted synced items go to Trash.':'Browsing does not import anything. Backup deletions are permanent and affect this backup only.'));
+      const toolbar=node('div');toolbar.className='library-toolbar';
+      const search=node('input');search.type='search';search.placeholder='Search names, notes, numbers and messages';search.setAttribute('aria-label','Search cloud library');
+      const filter=node('select');filter.setAttribute('aria-label','Filter cloud items');
       for(const [value,label] of [['all','All items'],['media','Photos and videos'],['notes','Notes'],['contacts','Contacts'],['chats','Conversations']]){const o=node('option',label);o.value=value;filter.append(o);}
-      snapshots.append(filter);
-      const items=node('div');snapshots.append(items);let shown=0,selected=[];
+      const sort=node('select');sort.setAttribute('aria-label','Sort cloud items');for(const [v,label] of [['new','Newest first'],['name','Name A–Z']]){const o=node('option',label);o.value=v;sort.append(o);}toolbar.append(search,filter,sort);snapshots.append(toolbar);
+      const count=node('p'),items=node('div');items.className='library-grid';snapshots.append(count,items);let shown=0,selected=[];
       const decoded=[];
       for(let index=0;index<manifest.records.length;index++){
-        const r=manifest.records[index];
-        decoded.push({index,store:r.store,value:await decode(r.value,async info=>({cloudMedia:info}))});
+        const r=manifest.records[index],value=await decode(r.value,async info=>({cloudMedia:info}));
+        decoded.push({index,store:r.store,value,name:value.name||value.title||(r.store==='notes'?String(value.text||'Untitled note').slice(0,80):r.store+' item'),search:JSON.stringify(value).toLowerCase()});
       }
+      async function getBlob(index,info){return item.sync?syncMedia(active[index],info):mediaBlob(item.id,info);}
+      async function exportRecord(r){
+        const value=await decode(manifest.records[r.index].value,async info=>({type:info.type,size:info.size,data:base64(new Uint8Array(await(await getBlob(r.index,info)).arrayBuffer()))}));
+        download(new Blob([JSON.stringify({format:'loft-portable-record-v1',store:r.store,value},null,2)],{type:'application/json'}),r.name+'.json');
+      }
+      button('Export matching records',async()=>{
+        if(!selected.length){progress('No matching records to export.');return;}
+        // Structured text export stays small. Original media downloads are explicit per item.
+        const out=selected.map(r=>({store:r.store,value:r.value}));
+        download(new Blob([JSON.stringify({format:'loft-library-text-export-v1',exportedAt:new Date().toISOString(),note:'Media entries contain metadata only. Download originals using each media card.',records:out},null,2)],{type:'application/json'}),'loft-library-export.json');
+        progress('Exported matching text records and media metadata. Use Download original for media files.');
+      },snapshots);
       async function page(){
-        const end=Math.min(shown+25,selected.length);
+        if(viewId!==libraryView||!section.isConnected)return;
+        const end=Math.min(shown+24,selected.length);
         for(;shown<end;shown++){
-          const {index,store,value}=selected[shown], card=node('article');card.style.cssText='border:1px solid #8886;border-radius:12px;padding:12px;margin:12px 0;overflow-wrap:anywhere';
-          card.append(node('h4',value.name||value.title||(store==='notes'?String(value.text||'Untitled note').slice(0,80):store+' item')));
-          card.append(node('small',({media:'Photo / video',notes:'Note',contacts:'Contact',chats:'Conversation'})[store]||store));
+          const r=selected[shown],{index,store,value}=r,card=node('article');card.className='library-card';
+          card.append(node('small',({media:'Photo / video',notes:'Note',contacts:'Contact',chats:'Conversation'})[store]),node('h4',r.name));
           if(store==='media'){
-            const info=value.blob&&value.blob.cloudMedia;
-            card.append(node('p',info?(info.size/1048576).toFixed(2)+' MB':'No media file'));
-            if(info)button('View photo / play video',async()=>{
-              progress('Loading selected media…');const blob=await (item.sync?syncMedia(active[index],info):mediaBlob(item.id,info));
-              const type=blob.type.startsWith('video/')?'video':blob.type.startsWith('image/')?'img':null;
-              if(!type)throw new Error('This media type cannot be previewed.');
-              const old=card.querySelector('img,video');if(old){URL.revokeObjectURL(old.src);objectURLs.delete(old.src);old.remove();}
-              const view=node(type),url=URL.createObjectURL(blob);objectURLs.add(url);view.src=url;view.style.cssText='display:block;max-width:100%;max-height:420px;margin:12px auto';
-              if(type==='video'){view.controls=true;view.preload='metadata';}else view.alt=value.name||'Cloud photo';
-              card.append(view);progress('Viewing cloud media. Nothing was imported.');
-            },card);
-          }else{
-            const text=node('pre');text.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:320px;overflow:auto';
-            text.textContent=store==='notes'?String(value.text||''):store==='contacts'?[value.name,value.number].filter(Boolean).join('\n'):(value.messages||[]).map(m=>(m.me?'You':value.name||'Contact')+' · '+new Date(m.ts).toLocaleString()+'\n'+String(m.text||'')).join('\n\n');
-            card.append(text);
-          }
-          button(item.sync?'Delete from synced collection':'Delete item from this backup',async()=>{
-            if(item.sync){
-              if(!confirm('Delete this item from the shared collection and enabled devices on their next sync? Offline edits may need conflict resolution. Older backups remain unchanged.'))return;
-              const selected=active[index];await request('sync-index',{}, {revision,entries:data.entries.map(e=>e.store===selected.store&&e.id===selected.id?{store:e.store,id:e.id,deleted:true}:e)});
-              await browse(item);progress('Deleted from the synced collection. Enabled devices receive this deletion on their next sync.');setTimeout(()=>{tick(true).catch(()=>{});},0);return;
+            const info=value.blob&&value.blob.cloudMedia,thumb=value.thumb&&value.thumb.cloudMedia;
+            card.append(node('p',info?bytesLabel(info.size):'No media file'));
+            const holder=node('div');holder.className='library-thumb';holder.textContent=info&&info.type.startsWith('video/')?'Video':'Photo';card.append(holder);
+            if(thumb){try{const blob=await getBlob(index,thumb);if(blob.type.startsWith('image/')){const image=node('img'),url=URL.createObjectURL(blob);objectURLs.add(url);image.src=url;image.alt=r.name;image.loading='lazy';holder.textContent='';holder.append(image);}}catch{holder.textContent='Preview unavailable · open original';}}
+            else if(typeof value.thumb==='string'&&/^data:image\/(jpeg|png|webp);base64,/.test(value.thumb)){const image=node('img');image.src=value.thumb;image.alt=r.name;image.loading='lazy';holder.textContent='';holder.append(image);}
+            if(info){
+              button('View photo / play video',async()=>{progress('Loading media…');const blob=await getBlob(index,info);if(!/^(image|video)\//.test(blob.type))throw new Error('Download this file to view it.');viewer(blob,r.name);progress('Preview open. Nothing was imported.');},card);
+              button('Download original',async()=>{progress('Preparing download…');download(await getBlob(index,info),value.name||'media');progress('Original media downloaded.');},card);
             }
-            if(!confirm('Permanently delete this item from THIS backup? Other backups and local device copies remain. A future save can upload the local copy again.'))return;
-            await request('remove-record',{id:item.id},{revision,index});
-            let warning='';try{progress('Removing unused media files…');await cleanup(item.id);}catch{warning=' The item was removed, but unused media cleanup is unfinished. Use Clean unused media to retry.';}
-            await browse(item);progress('Item deleted from this backup. Local copies and other backups remain.'+warning);
+          }else{
+            const text=node('pre',recordText(store,value));text.className='library-text';card.append(text);
+            button('Download text',async()=>download(new Blob([recordText(store,value)],{type:'text/plain;charset=utf-8'}),r.name+'.txt'),card);
+            button('Export record as JSON',()=>exportRecord(r),card);
+          }
+          if(item.trash){
+            const entry=active[index],remaining=Math.max(0,Math.ceil((entry.expiresAt-(data.serverTime||Date.now()))/86400000));
+            card.append(node('p',remaining?'Recoverable for '+remaining+' more day'+(remaining===1?'':'s')+' · until '+new Date(entry.expiresAt).toLocaleString():'Recovery expired · awaiting cleanup'));
+            if(remaining)button('Restore item',async()=>{await request('trash-restore',{}, {revision,store:entry.store,id:entry.id});await browse(item);progress('Restored to your cloud collection. Enabled devices receive it on their next sync.');setTimeout(()=>tick(true).catch(()=>{}),0);},card);
+            button('Delete permanently',async()=>{if(!confirm('Permanently remove this item from Trash now? Older backups may still hold separate copies.'))return;await request('trash-purge',{}, {revision,store:entry.store,id:entry.id});await request('sync-cleanup',{},{}).catch(()=>{});await browse(item);progress('Removed from Trash. Remaining media cleanup will resume automatically.');},card);
+          }else button(item.sync?'Move to Trash':'Delete item from this backup',async()=>{
+            if(item.sync){
+              if(!confirm('Move this item to Trash? Enabled devices receive the deletion on their next sync. You can restore it for 30 days.'))return;
+              const entry=active[index];await request('sync-index',{}, {revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?{store:e.store,id:e.id,deleted:true}:e)});
+              await browse(item);progress('Moved to Trash for 30 days.');setTimeout(()=>tick(true).catch(()=>{}),0);return;
+            }
+            if(!confirm('Permanently delete this item from THIS backup? Other backups and device copies remain.'))return;
+            await request('remove-record',{id:item.id},{revision,index});let warning='';try{await cleanup(item.id);}catch{warning=' Use Clean unused media to finish cleanup.';}await browse(item);progress('Deleted from this backup.'+warning);
           },card);
+          if(viewId!==libraryView||!section.isConnected)return;
           items.append(card);
         }
         if(shown<selected.length){const more=button('Show more items',async()=>{more.remove();await page();},items);}
       }
-      async function applyFilter(){clearPreviews();items.textContent='';shown=0;selected=decoded.filter(x=>filter.value==='all'||x.store===filter.value);if(!selected.length)items.append(node('p','No items in this category.'));await page();}
-      filter.onchange=()=>run(applyFilter);await applyFilter();
-      if(!item.sync)button('Clean unused media',async()=>{await cleanup(item.id);progress('Unused media removed from this backup.');},snapshots);
-      if(!item.sync)button('Delete entire backup',()=>deleteBackup(item),snapshots);
-      progress('Browsing '+manifest.records.length+' cloud items. No local data changed.');
+      async function applyFilter(){
+        clearPreviews();items.textContent='';shown=0;const query=search.value.trim().toLowerCase();
+        selected=decoded.filter(x=>(filter.value==='all'||x.store===filter.value)&&(!query||x.search.includes(query)));
+        selected.sort((a,b)=>sort.value==='name'?a.name.localeCompare(b.name):Number(b.value.updatedAt||b.value.createdAt||0)-Number(a.value.updatedAt||a.value.createdAt||0));
+        count.textContent=selected.length+' of '+decoded.length+' items';if(!selected.length)items.append(node('p',item.trash?'Trash is empty or no items match your search.':'No matching items. Try another search or filter.'));await page();
+      }
+      // Coalesce typing while a media thumbnail is loading, without overlapping renders.
+      let rendering=false,pending=false;
+      async function refreshFilter(){pending=true;if(rendering)return;rendering=true;try{while(pending){pending=false;await applyFilter();}}catch(e){progress(e.message);}finally{rendering=false;}}
+      search.oninput=refreshFilter;filter.onchange=refreshFilter;sort.onchange=refreshFilter;await refreshFilter();
+      if(!item.sync){button('Clean unused media',async()=>{await cleanup(item.id);progress('Unused backup media removed.');},snapshots);button('Delete entire backup',()=>deleteBackup(item),snapshots);}
+      progress('Browsing '+manifest.records.length+' items. No local data changed.');
     }
     async function deleteBackup(item){
       if(!confirm('Permanently delete this ENTIRE cloud backup and its media? Local device copies and other backups remain. This cannot be undone.'))return;
@@ -393,16 +449,23 @@
       if(cursor){const more=button('Load more snapshots',async()=>{more.remove();await loadPage();},snapshots);}
       progress(snapshots.childElementCount?'Choose a snapshot to browse, import or delete.':'No saved snapshots yet.');
     }
-    async function reload(){clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
+    async function reload(){libraryView++;clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
     list.onclick=()=>run(reload);
     logout.onclick = () => run(async () => {
-      const old = session; session = null; clearPreviews(); snapshots.textContent = '';
+      const old = session; session = null; libraryView++; clearPreviews(); snapshots.textContent = '';
       if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
+      syncStatus('Sign in to resume cloud sync.');
       progress('Signed out on this page. Local records are still available behind your local privacy lock.');
     });
+    const tabs=node('nav');tabs.className='library-tabs';tabs.setAttribute('aria-label','Cloud Library sections');
+    button('Collection',()=>browse({sync:true}),tabs);
+    button('Trash',()=>browse({sync:true,trash:true}),tabs);
+    button('Backups',reload,tabs);
+    button('Storage',storageOverview,tabs);
+    actions.prepend(tabs);
     const syncPanel=node('div');syncPanel.style.cssText='border:1px solid #8886;border-radius:12px;padding:12px;margin:16px 0';
     const syncText=node('p'),conflictList=node('div');syncText.setAttribute('role','status');
-    syncPanel.append(node('h3','Automatic sync'),node('p','Sync runs while this page is open and signed in, when you are on Home or Settings. Enable it on each device. Offline changes are kept until you reconnect. Deletions sync too; older backups are unchanged.'),syncText);
+    syncPanel.append(node('h3','Automatic sync'),node('p','Sync runs while this page is open and signed in, when you are on Home, Cloud Library or Settings. Enable it on each device. Offline changes are kept until you reconnect. Deletions sync too; older backups are unchanged.'),syncText);
     const toggle=button('Enable automatic sync',async()=>{
       if(!auto.enabled&&!confirm('Enable automatic sync on this device? Current photos, videos, notes, contacts and conversations will merge with your shared collection. Future edits and deletions sync between enabled devices. Conflicting edits pause for your choice. Dated backups stay separate.'))return;
       await setAuto(!auto.enabled);
@@ -434,9 +497,15 @@
     }
     const listener=()=>{if(section.isConnected)renderSync();else window.removeEventListener('loft-sync-status',listener);};window.addEventListener('loft-sync-status',listener);
     bridge.openDB().then(async db=>{auto.enabled=!!(db&&await dbRead(db,'sync-enabled-v1'));auto.loaded=true;syncStatus(auto.enabled?'Automatic sync enabled. Sign in to resume.':'Automatic sync is off.');await tick(true);}).catch(e=>syncStatus(e.message));
+    const observer=new MutationObserver(()=>{if(!section.isConnected){libraryView++;clearPreviews();observer.disconnect();}});observer.observe(document.body,{childList:true,subtree:true});
     renderSync();
     display();
+    if(bridge.library&&session)run(()=>browse({sync:true}));
   }
-  window.LoftCloud = {mount};
+  window.LoftCloud = {mount, status:()=>({signedIn:!!session,enabled:auto.enabled,message:auto.message}),
+    attachHome(element){
+      const render=()=>{element.textContent=!session?'Cloud · Sign in to sync':!navigator.onLine?'Cloud · Offline — changes stay on this device':auto.enabled?'Cloud · '+auto.message:'Cloud · Automatic sync paused';};
+      window.addEventListener('loft-sync-status',render);window.addEventListener('online',render);window.addEventListener('offline',render);render();
+    }};
   if (typeof module !== 'undefined') module.exports = {encode, decode};
 })();

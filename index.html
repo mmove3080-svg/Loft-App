@@ -557,6 +557,7 @@ button.set-row:active{background:rgba(120,120,128,.12)}
   #wall{transition:none}
 }
 </style>
+<link rel="stylesheet" href="library.css">
 </head>
 <body>
 <div id="wall" aria-hidden="true"></div>
@@ -566,6 +567,7 @@ button.set-row:active{background:rgba(120,120,128,.12)}
     <div id="status"><span id="clocktext">--:--</span></div>
 
     <div id="springboard">
+      <button id="home-cloud-status" data-open="cloud" aria-label="Open Cloud Library and sync status">Cloud · Sign in to sync</button>
       <div id="grid">
         <!-- Calculator + Settings (this row replaced the Weather widget) -->
         <div class="gridapps" id="w-apps">
@@ -799,7 +801,7 @@ function layout(){
   // height-constrained column: rows*0.965 + gaps must fit the springboard
   var dockBlock=icon+2*(icon*0.30)+sw*0.018;
   var homeBar=Math.min(clamp(sw*0.062,18,34), vh*0.062);
-  var availH=vh-statush-dockBlock-homeBar-sw*0.03;
+  var availH=vh-statush-dockBlock-homeBar-sw*0.03-56;
   var colH=(availH-(rows-1)*gap)/(rows*0.965);
   var colw=Math.max(28,Math.min(colW,colH));
 
@@ -2181,6 +2183,15 @@ ICON.calculator='<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100"
   '<rect x="73" y="46" width="12" height="3.4" rx="1.7"/>'+
   '<rect x="73" y="66" width="12" height="3.4" rx="1.7"/><rect x="73" y="74" width="12" height="3.4" rx="1.7"/></g></svg>';
 
+REG.cloud={
+  title:'Cloud Library',
+  mount:function(api){
+    api.root.appendChild(el('div','safetop'));
+    var scroll=el('div','scroll');api.root.appendChild(scroll);api.root.appendChild(el('div','safebot'));
+    window.LoftCloud.mount(scroll,{library:true,openDB:openDB,canSync:function(){return !current||current.id==='settings'||current.id==='cloud';},refresh:function(){DB.all('media').then(renderPhotosWidget);}});
+  }
+};
+window.LoftCloud.attachHome(document.getElementById('home-cloud-status'));
 REG.settings={
   title:'Settings',
   mount:function(api){
@@ -2195,7 +2206,7 @@ REG.settings={
     function render(){
       scroll.textContent='';
       scroll.appendChild(el('div','set-title','Settings'));
-      if(window.LoftCloud) window.LoftCloud.mount(scroll, {openDB:openDB, canSync:function(){return !current || current.id==='settings';}, refresh:function(){DB.all('media').then(renderPhotosWidget);}});
+      if(window.LoftCloud) window.LoftCloud.mount(scroll, {openDB:openDB, canSync:function(){return !current || (current.id==='settings'||current.id==='cloud');}, refresh:function(){DB.all('media').then(renderPhotosWidget);}});
 
       /* ---- appearance ---- */
       scroll.appendChild(el('div','set-grp','Appearance'));

@@ -32,7 +32,7 @@ test('rejects path traversal and malformed part IDs',()=>{
 test('all private API actions reject unauthenticated calls', async()=>{
   process.env.SUPABASE_URL=cfg.url;process.env.SUPABASE_PUBLISHABLE_KEY=cfg.key;process.env.APP_OWNER_USER_ID=cfg.owner;
   const handler=require('../api/cloud');
-  for(const action of ['session','list','part','commit','browse','remove-record','cleanup','delete-snapshot','sync-index','sync-part','sync-cleanup']) {
+  for(const action of ['session','list','part','commit','browse','remove-record','cleanup','delete-snapshot','sync-index','sync-part','sync-cleanup','trash-restore','trash-purge','storage-usage']) {
     let status, body; const headers={};
     const res={setHeader:(k,v)=>headers[k]=v,status:s=>{status=s;return res;},json:v=>{body=v;return res;}};
     await handler({headers:{},method:'GET',query:{action}},res);
