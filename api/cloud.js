@@ -1,5 +1,5 @@
 'use strict';
-const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command} = require('@aws-sdk/client-s3');
+const {S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand} = require('@aws-sdk/client-s3');
 const {HttpError, settings, owner, snapshotId, partId} = require('../lib/security');
 const {manage} = require('../lib/snapshots');
 const {syncIndex} = require('../lib/sync');
@@ -40,6 +40,10 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(await syncIndex({s3,Bucket,prefix,method:req.method,body,cleanup:action==='sync-cleanup',operation:action==='trash-restore'?'restore':action==='trash-purge'?'purge':undefined}));
     }
     const id = snapshotId(req.query.id);
+    if(action==='part-status'&&req.method==='GET'){
+      try{const r=await s3.send(new HeadObjectCommand({Bucket,Key:prefix+'parts/'+id+'/'+partId(req.query.part)}));return res.status(200).json({exists:true,hash:r.Metadata?.sha256,size:r.ContentLength});}
+      catch(e){if(e.$metadata?.httpStatusCode===404)return res.status(200).json({exists:false});throw e;}
+    }
     if (['browse','remove-record','cleanup','delete-snapshot'].includes(action)) {
       if (req.method !== (action === 'browse' ? 'GET' : 'POST')) throw new HttpError(405, 'Method not allowed.');
       let body=req.body || {};
@@ -69,7 +73,11 @@ module.exports = async function handler(req, res) {
       bytes = Buffer.from(JSON.stringify(body));
       if (bytes.length > 3000000) throw new HttpError(413, 'Snapshot metadata too large.');
     }
-    await s3.send(new PutObjectCommand({Bucket, Key: key, Body: bytes, ContentType: isPart ? 'application/octet-stream' : 'application/json', CacheControl: 'private, no-store', IfNoneMatch: '*'}));
+    try{await s3.send(new PutObjectCommand({Bucket, Key: key, Body: bytes, Metadata:isPart?{sha256:require('node:crypto').createHash('sha256').update(bytes).digest('hex')}:undefined, ContentType: isPart ? 'application/octet-stream' : 'application/json', CacheControl: 'private, no-store', IfNoneMatch: '*'}));}catch(e){
+      if(e.$metadata?.httpStatusCode!==412)throw e;
+      const prior=await s3.send(new GetObjectCommand({Bucket,Key:key}));
+      if(!Buffer.from(await prior.Body.transformToByteArray()).equals(bytes))throw new HttpError(409,'Upload differs from the saved part. Progress preserved.');
+    }
     return res.status(201).json({saved: true});
   } catch (err) {
     const status = err.status || (err.$metadata && err.$metadata.httpStatusCode === 404 ? 404 : err.$metadata && err.$metadata.httpStatusCode === 412 ? 409 : 503);

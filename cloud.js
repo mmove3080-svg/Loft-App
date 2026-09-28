@@ -6,7 +6,7 @@
     location.replace('/reset.html' + location.hash);
     return;
   }
-  const stores = ['media', 'notes', 'contacts', 'chats'];
+  const stores = ['media', 'notes', 'contacts', 'chats', 'albums'];
   let config, session, refreshing, busy = false;
   const apiURL = '/api/cloud';
   const uuid = () => crypto.randomUUID();
@@ -14,7 +14,7 @@
   async function result(response) {
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || body.msg || body.error_description || 'Request failed (' + response.status + ').');
+      const error=new Error(body.error || body.msg || body.error_description || 'Request failed (' + response.status + ').');error.status=response.status;throw error;
     }
     return response;
   }
@@ -33,7 +33,7 @@
   async function token() {
     if (!session) throw new Error('Please sign in.');
     if (session.expires_at < Date.now() + 60000) {
-      if (!refreshing) refreshing = auth('refresh_token', {refresh_token: session.refresh_token}).then(s => {session = s;}).finally(() => {refreshing = null;});
+      if (!refreshing) refreshing = auth('refresh_token', {refresh_token: session.refresh_token}).then(async s => {session = s;await rememberSnapshotSession();}).finally(() => {refreshing = null;});
       await refreshing;
     }
     return session.access_token;
@@ -96,30 +96,52 @@
       tx.onerror = tx.onabort = () => reject(tx.error || new Error('Could not read local data.'));
     });
   }
-  async function save(bridge, progress) {
-    const records = await readLocal(bridge), id = uuid();
-    let part = 0, uploaded = 0;
-    const encoded = [];
-    for (let i = 0; i < records.length; i++) {
-      progress('Saving record ' + (i+1) + ' of ' + records.length + '…');
-      encoded.push({store: records[i].store, value: await encode(records[i].value, async blob => {
-        const parts = [];
-        for (let offset = 0; offset < blob.size; offset += 1048576) {
-          const slice = blob.slice(offset, offset + 1048576), number = part++;
-          if (part > 1000000) throw new Error('This snapshot has too many upload parts.');
-          const digest = await hash(slice);
-          await request('part', {id, part: String(number)}, {data: base64(new Uint8Array(await slice.arrayBuffer()))});
-          parts.push({number, hash: digest}); uploaded += slice.size;
-          progress('Uploaded ' + (uploaded / 1048576).toFixed(1) + ' MB · record ' + (i+1) + '/' + records.length);
-        }
-        return {type: blob.type, size: blob.size, parts};
-      })});
-    }
-    const manifest = {version: 1, createdAt: new Date().toISOString(), parts: part, records: encoded};
-    if (new Blob([JSON.stringify(manifest)]).size > 3000000) throw new Error('Snapshot metadata exceeds the 3 MB limit. The snapshot was not committed.');
-    await request('commit', {id}, manifest);
-    progress('Saved ' + records.length + ' records to a new cloud snapshot. Changes made afterward need another save.');
+  let snapshotState=null, snapshotRunning=false;
+  async function rememberSnapshotSession(){
+    if(!auto.bridge||!session)return;const db=await auto.bridge.openDB();
+    if(db&&await dbRead(db,'snapshot-job-v2'))await window.LoftSnapshotJob.transaction(db,s=>s.put(session,'snapshot-session-v2'));
   }
+  function snapshotProgress(state){snapshotState=state;window.dispatchEvent(new Event('loft-snapshot-status'));}
+  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
+  async function save(bridge, progress, createNew=true){
+    const db=await bridge.openDB(),engine=window.LoftSnapshotJob;
+    if(!db)throw new Error('Persistent local storage is unavailable.');
+    if(snapshotRunning)return;
+    const work=async lock=>{
+      if(!lock||snapshotRunning)return;snapshotRunning=true;
+      try{
+        let job=await engine.read(db,engine.KEY);
+        if(!job&&createNew){job=await engine.create(db,await readLocal(bridge),uuid());if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});}
+        if(!job)return;
+        await rememberSnapshotSession();
+        await engine.run(db,{
+          encode,hash,online:()=>navigator.onLine!==false,
+          progress:s=>{snapshotProgress(s);if(progress)progress(snapshotMessage(s));},
+          exists:async(id,p)=>{const r=await(await request('part-status',{id,part:String(p.number)})).json();if(r.exists&&(r.hash!==p.hash||r.size!==p.size))throw new Error('Saved upload part does not match.');return r.exists;},
+          upload:async(id,p,blob)=>request('part',{id,part:String(p.number)},{data:base64(new Uint8Array(await blob.arrayBuffer()))}),
+          commit:(id,manifest)=>request('commit',{id},manifest)
+        });
+      }finally{snapshotRunning=false;window.dispatchEvent(new Event('loft-snapshot-status'));}
+    };
+    if(navigator.locks)await navigator.locks.request('loft-snapshot-upload-v2',{ifAvailable:true},work);
+    else throw new Error('Update your browser to enable safe resumable snapshots.');
+  }
+  async function resumeSnapshot(){
+    if(!auto.bridge||!session||busy||snapshotRunning||navigator.onLine===false)return;
+    busy=true;try{await save(auto.bridge,null,false);}catch{}finally{busy=false;}
+  }
+  async function init(bridge){
+    auto.bridge=bridge;
+    try{const db=await bridge.openDB();if(!db)return;
+      snapshotState=await dbRead(db,'snapshot-job-v2')||await dbRead(db,'snapshot-last-v2');
+      if(await dbRead(db,'snapshot-job-v2')){session=session||await dbRead(db,'snapshot-session-v2');if(session)await resumeSnapshot();}
+      window.dispatchEvent(new Event('loft-snapshot-status'));
+    }catch(e){syncStatus(e.message);}
+  }
+  window.addEventListener('online',()=>resumeSnapshot());
+  window.addEventListener('pageshow',()=>resumeSnapshot());
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resumeSnapshot();});
+  setInterval(()=>resumeSnapshot(),15000);
   async function importSnapshot(bridge, id, progress) {
     const db = await bridge.openDB();
     if (!db) throw new Error('Persistent local storage is unavailable.');
@@ -153,22 +175,15 @@
     for (const r of local) fingerprints.add(r.store + ':' + await fingerprint(r.value));
     const pending = [];
     for (const r of decoded) if (!fingerprints.has(r.store + ':' + await fingerprint(r.value))) pending.push(r);
+    const existingIds=new Set(local.map(r=>r.store+':'+r.value.id)),albumMap=new Map();
+    for(const r of pending){if(existingIds.has(r.store+':'+r.value.id)){const old=r.value.id;r.value.id=uuid();if(r.store==='albums')albumMap.set(old,r.value.id);if(typeof r.value.name==='string')r.value.name+=' (cloud copy)';if(r.store==='notes'&&typeof r.value.text==='string')r.value.text='[Cloud copy]\n'+r.value.text;}}
+    for(const r of pending)if(r.store==='media'&&albumMap.has(r.value.albumId))r.value.albumId=albumMap.get(r.value.albumId);
     await new Promise((resolve, reject) => {
       const tx = db.transaction([...stores, 'kv'], 'readwrite');
       const marker = tx.objectStore('kv').get('cloud-import:' + id);
       marker.onsuccess = () => {
         if (marker.result) {tx.abort(); return;}
-        for (const r of pending) {
-          const store = tx.objectStore(r.store), existing = store.get(r.value.id);
-          existing.onsuccess = () => {
-            if (existing.result) {
-              r.value.id = uuid();
-              if (typeof r.value.name === 'string') r.value.name += ' (cloud copy)';
-              if (r.store === 'notes' && typeof r.value.text === 'string') r.value.text = '[Cloud copy]\n' + r.value.text;
-            }
-            store.add(r.value);
-          };
-        }
+        for (const r of pending) tx.objectStore(r.store).add(r.value);
         tx.objectStore('kv').put(Date.now(), 'cloud-import:' + id);
         const rev=tx.objectStore('kv').get('sync-local-revision');rev.onsuccess=()=>tx.objectStore('kv').put((rev.result||0)+1,'sync-local-revision');
       };
@@ -197,6 +212,14 @@
     for(const p of info.parts){const b=await (await request('sync-part',{id:entry.source,part:String(p.number)})).blob();if(await hash(b)!==p.hash)throw new Error('Sync media integrity check failed.');chunks.push(b);}
     const b=new Blob(chunks,{type:info.type});if(b.size!==info.size)throw new Error('Incomplete synced media.');return b;
   }
+  async function reuseEncoding(value,entry){
+    if(!entry||entry.deleted)return null;
+    const refs=[];await decode(entry.value,async info=>{refs.push(info);return null;});let n=0,valid=true;
+    const encoded=await encode(value,async blob=>{const info=refs[n++];if(!info||blob.size!==info.size||blob.type!==info.type||info.parts.length!==Math.ceil(blob.size/1048576)){valid=false;return null;}
+      for(let i=0;i<info.parts.length;i++)if(await hash(blob.slice(i*1048576,(i+1)*1048576))!==info.parts[i].hash){valid=false;break;}
+      return info;
+    });return valid&&n===refs.length?encoded:null;
+  }
   async function syncCycle(){
     const engine=window.LoftSyncEngine;if(!engine)throw new Error('Reload the app to finish the update.');
     const local=await syncRead();let entries;
@@ -211,7 +234,10 @@
     const updates=[];
     for(const e of plan.pull){
       if(e.deleted){updates.push(e);continue;}
-      const value=await decode(e.value,info=>syncMedia(e,info));
+      const localEntry=entries.find(x=>x.store===e.store&&x.id===e.id);let value;
+      const reuse=localEntry&&await reuseEncoding(localEntry.value,e);
+      if(reuse){const blobs=[];await encode(localEntry.value,async b=>{blobs.push(b);return null;});let n=0;value=await decode(e.value,async()=>blobs[n++]);}
+      else value=await decode(e.value,info=>syncMedia(e,info));
       if(!value||value.id!==e.id||await hash(new Blob([await fingerprint(value)]))!==e.hash)throw new Error('Synced record integrity check failed.');
       updates.push({...e,value});
     }
@@ -219,6 +245,8 @@
       const next=new Map(remote.entries.map(e=>[engine.keyOf(e),e]));
       for(const e of plan.push){
         if(e.deleted){next.set(engine.keyOf(e),{store:e.store,id:e.id,deleted:true});continue;}
+        const previous=next.get(engine.keyOf(e)),reuse=await reuseEncoding(e.value,previous);
+        if(reuse){next.set(engine.keyOf(e),{store:e.store,id:e.id,hash:e.hash,deleted:false,source:previous.source,value:reuse});continue;}
         const source=uuid();let number=0;
         const value=await encode(e.value,async blob=>{
           const parts=[];
@@ -297,12 +325,16 @@
       progress('Signed in. Your cloud library is ready.');
       syncStatus(auto.enabled?'Automatic sync enabled.':'Automatic sync is off.');
       if(bridge.library)await browse({sync:true});
-      setTimeout(()=>{tick(true).catch(()=>{});},0);
+      await rememberSnapshotSession();setTimeout(async()=>{await resumeSnapshot();tick(true).catch(()=>{});},0);
     });};
     upload.onclick = () => run(() => save(bridge, progress));
+    const snapshotPanel=node('section'),snapshotText=node('p'),snapshotMeter=node('progress');snapshotText.setAttribute('role','status');snapshotMeter.style.width='100%';snapshotPanel.append(snapshotText,snapshotMeter);section.insertBefore(snapshotPanel,snapshots);
+    const renderSnapshot=()=>{if(!section.isConnected){window.removeEventListener('loft-snapshot-status',renderSnapshot);return;}snapshotPanel.hidden=!snapshotState;if(snapshotState){snapshotText.textContent=snapshotMessage(snapshotState);snapshotMeter.max=snapshotState.total||1;snapshotMeter.value=snapshotState.index;upload.textContent=snapshotState.state==='complete'?'Save snapshot':'Resume snapshot';}upload.disabled=snapshotRunning;display();};
+    window.addEventListener('loft-snapshot-status',renderSnapshot);renderSnapshot();
+    bridge.openDB().then(async db=>{snapshotState=await dbRead(db,'snapshot-job-v2')||await dbRead(db,'snapshot-last-v2');renderSnapshot();});
     let cursor;
-    const objectURLs = new Set();
-    function clearPreviews(){for(const dialog of document.querySelectorAll('dialog[data-loft-preview]')){if(dialog.close)dialog.close();else dialog.remove();}for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
+    const objectURLs = new Set();let previewObserver=null,previewQueue=[],previewActive=0,cloudViewerClose=null;
+    function clearPreviews(){if(previewObserver)previewObserver.disconnect();previewObserver=null;previewQueue=[];if(cloudViewerClose)cloudViewerClose();cloudViewerClose=null;for(const dialog of document.querySelectorAll('dialog[data-loft-preview]')){if(dialog.close)dialog.close();else dialog.remove();}for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
     function button(text,fn,parent){const b=node('button',text);b.type='button';b.style.cssText='display:block;padding:12px;margin:8px 0;font:inherit;width:100%;border:1px solid #8888;border-radius:8px;background:var(--card,#fff);color:var(--ink,#111)';b.onclick=()=>run(fn);parent.append(b);return b;}
     async function cleanup(id){
       let next;
@@ -332,7 +364,7 @@
       if(dialog.showModal)dialog.showModal();else{dialog.setAttribute('open','');close.onclick=()=>{URL.revokeObjectURL(url);dialog.remove();};}
     }
     async function storageOverview(){
-      libraryView++;
+      currentBrowsing=null;libraryView++;
       clearPreviews();snapshots.textContent='';snapshots.append(node('h3','Storage overview'));
       const summary=node('p','Calculating your cloud storage…');snapshots.append(summary);
       const total={sync:0,backups:0,other:0,objects:0};let next;
@@ -344,8 +376,9 @@
       if(navigator.storage&&navigator.storage.estimate){const local=await navigator.storage.estimate();snapshots.append(node('p','This browser uses about '+bytesLabel(local.usage||0)+' of '+bytesLabel(local.quota||0)+' available to this site. This includes offline records and app files.'));}
       progress('Storage overview updated.');
     }
-    let libraryView=0;
+    let libraryView=0,currentBrowsing=null,browseDirty=false;
     async function browse(item){
+      currentBrowsing=item;
       const viewId=++libraryView;
       clearPreviews();snapshots.textContent='';progress('Loading library…');
       const data=await(await(item.sync?request('sync-index'):request('browse',{id:item.id}))).json();
@@ -357,15 +390,35 @@
       const toolbar=node('div');toolbar.className='library-toolbar';
       const search=node('input');search.type='search';search.placeholder='Search names, notes, numbers and messages';search.setAttribute('aria-label','Search cloud library');
       const filter=node('select');filter.setAttribute('aria-label','Filter cloud items');
-      for(const [value,label] of [['all','All items'],['media','Photos and videos'],['notes','Notes'],['contacts','Contacts'],['chats','Conversations']]){const o=node('option',label);o.value=value;filter.append(o);}
-      const sort=node('select');sort.setAttribute('aria-label','Sort cloud items');for(const [v,label] of [['new','Newest first'],['name','Name A–Z']]){const o=node('option',label);o.value=v;sort.append(o);}toolbar.append(search,filter,sort);snapshots.append(toolbar);
+      for(const [value,label] of [['all','All items'],['media','Photos and videos'],['notes','Notes'],['contacts','Contacts'],['chats','Conversations'],['albums','Albums']]){const o=node('option',label);o.value=value;filter.append(o);}
+      const sort=node('select');sort.setAttribute('aria-label','Sort cloud items');for(const [v,label] of [['new','Newest first'],['name','Name A–Z']]){const o=node('option',label);o.value=v;sort.append(o);}const albumFilter=node('select');albumFilter.setAttribute('aria-label','Cloud album');toolbar.append(search,filter,albumFilter,sort);snapshots.append(toolbar);
       const count=node('p'),items=node('div');items.className='library-grid';snapshots.append(count,items);let shown=0,selected=[];
       const decoded=[];
       for(let index=0;index<manifest.records.length;index++){
         const r=manifest.records[index],value=await decode(r.value,async info=>({cloudMedia:info}));
         decoded.push({index,store:r.store,value,name:value.name||value.title||(r.store==='notes'?String(value.text||'Untitled note').slice(0,80):r.store+' item'),search:JSON.stringify(value).toLowerCase()});
       }
+      for(const [id,name] of [['','All albums'],['unfiled','Unfiled'],...decoded.filter(r=>r.store==='albums').map(r=>[r.value.id,r.name])]){const option=node('option',name);option.value=id;albumFilter.append(option);}
       async function getBlob(index,info){return item.sync?syncMedia(active[index],info):mediaBlob(item.id,info);}
+      async function getThumb(index,info){
+        const source=item.sync?active[index].source:item.id,key='cloud-thumb-v2:'+source+':'+info.parts.map(p=>p.number+'-'+p.hash).join(',');
+        const db=await bridge.openDB();let cached;try{cached=db&&await dbRead(db,key);}catch{}
+        if(cached)return cached.blob;
+        const blob=await getBlob(index,info);
+        if(db)try{await window.LoftSnapshotJob.transaction(db,s=>s.put({blob,at:Date.now()},key));
+          await new Promise((resolve,reject)=>{const t=db.transaction('kv','readwrite'),s=t.objectStore('kv'),q=s.openCursor(IDBKeyRange.bound('cloud-thumb-v2:','cloud-thumb-v2:\uffff')),entries=[];q.onsuccess=()=>{const c=q.result;if(c){entries.push({key:c.key,at:c.value.at});c.continue();}else{entries.sort((a,b)=>b.at-a.at);for(const x of entries.slice(160))s.delete(x.key);}};t.oncomplete=resolve;t.onerror=t.onabort=()=>reject(t.error);});
+        }catch{}return blob;
+      }
+      function watchPreview(holder,load,name){
+        const task={holder,load,name,near:false,view:viewId};holder._previewTask=task;
+        if(!previewObserver&&window.IntersectionObserver){previewObserver=new IntersectionObserver(entries=>{for(const e of entries){const t=e.target._previewTask;t.near=e.isIntersecting;if(t.near&&!t.queued&&!t.done){t.queued=true;previewQueue.push(t);}}pumpPreviews();},{root:section.closest('.scroll'),rootMargin:'400px 0px'});}
+        if(previewObserver)previewObserver.observe(holder);else{task.near=true;task.queued=true;previewQueue.push(task);}
+      }
+      function pumpPreviews(){
+        previewQueue=previewQueue.filter(t=>{if(t.near&&t.holder.isConnected&&t.view===libraryView)return true;t.queued=false;return false;});
+        previewQueue.sort((a,b)=>{const priority=t=>{const r=t.holder.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight?0:Math.abs(r.top-innerHeight/2);};return priority(a)-priority(b);});
+        while(previewActive<4&&previewQueue.length){const t=previewQueue.shift();previewActive++;t.done=true;(async()=>{try{const blob=await t.load();if(t.view!==libraryView||!t.holder.isConnected)return;const img=node('img'),url=URL.createObjectURL(blob);objectURLs.add(url);img.src=url;img.alt=t.name;img.decoding='async';t.holder.replaceChildren(img);}catch{if(t.holder.isConnected)t.holder.textContent='Preview unavailable · open original';}finally{previewActive--;pumpPreviews();}})();}
+      }
       async function exportRecord(r){
         const value=await decode(manifest.records[r.index].value,async info=>({type:info.type,size:info.size,data:base64(new Uint8Array(await(await getBlob(r.index,info)).arrayBuffer()))}));
         download(new Blob([JSON.stringify({format:'loft-portable-record-v1',store:r.store,value},null,2)],{type:'application/json'}),r.name+'.json');
@@ -382,17 +435,21 @@
         const end=Math.min(shown+24,selected.length);
         for(;shown<end;shown++){
           const r=selected[shown],{index,store,value}=r,card=node('article');card.className='library-card';
-          card.append(node('small',({media:'Photo / video',notes:'Note',contacts:'Contact',chats:'Conversation'})[store]),node('h4',r.name));
+          card.append(node('small',({media:'Photo / video',notes:'Note',contacts:'Contact',chats:'Conversation',albums:'Album'})[store]),node('h4',r.name));
           if(store==='media'){
             const info=value.blob&&value.blob.cloudMedia,thumb=value.thumb&&value.thumb.cloudMedia;
             card.append(node('p',info?bytesLabel(info.size):'No media file'));
             const holder=node('div');holder.className='library-thumb';holder.textContent=info&&info.type.startsWith('video/')?'Video':'Photo';card.append(holder);
-            if(thumb){try{const blob=await getBlob(index,thumb);if(blob.type.startsWith('image/')){const image=node('img'),url=URL.createObjectURL(blob);objectURLs.add(url);image.src=url;image.alt=r.name;image.loading='lazy';holder.textContent='';holder.append(image);}}catch{holder.textContent='Preview unavailable · open original';}}
+            if(thumb)watchPreview(holder,()=>getThumb(index,thumb),r.name);
             else if(typeof value.thumb==='string'&&/^data:image\/(jpeg|png|webp);base64,/.test(value.thumb)){const image=node('img');image.src=value.thumb;image.alt=r.name;image.loading='lazy';holder.textContent='';holder.append(image);}
             if(info){
-              button('View photo / play video',async()=>{progress('Loading media…');const blob=await getBlob(index,info);if(!/^(image|video)\//.test(blob.type))throw new Error('Download this file to view it.');viewer(blob,r.name);progress('Preview open. Nothing was imported.');},card);
+              button('View photo / play video',async()=>{progress('Loading media…');const blob=await getBlob(index,info);if(!/^(image|video)\//.test(blob.type))throw new Error('Download this file to view it.');const mediaItems=selected.filter(x=>x.store==='media'&&x.value.blob?.cloudMedia).map(x=>({...x,id:String(x.index),kind:x.value.kind||(x.value.blob.cloudMedia.type.startsWith('video/')?'video':'image')}));
+                const loaded=new Map([[String(index),blob]]);cloudViewerClose=window.LoftViewer.open({parent:section.closest('.appwin')||document.body,items:mediaItems,id:String(index),download,get:async m=>{let b=loaded.get(m.id);if(!b)b=await getBlob(m.index,m.value.blob.cloudMedia);return {...m.value,name:m.name,kind:m.kind,blob:b};},onClose:()=>{cloudViewerClose=null;}});progress('Preview open. Nothing was imported.');},card);
               button('Download original',async()=>{progress('Preparing download…');download(await getBlob(index,info),value.name||'media');progress('Original media downloaded.');},card);
             }
+          }else if(store==='albums'){
+            card.append(node('p',decoded.filter(x=>x.store==='media'&&x.value.albumId===value.id).length+' items'));
+            button('Open album',async()=>{albumFilter.value=value.id;filter.value='media';await refreshFilter();},card);
           }else{
             const text=node('pre',recordText(store,value));text.className='library-text';card.append(text);
             button('Download text',async()=>download(new Blob([recordText(store,value)],{type:'text/plain;charset=utf-8'}),r.name+'.txt'),card);
@@ -403,7 +460,7 @@
             card.append(node('p',remaining?'Recoverable for '+remaining+' more day'+(remaining===1?'':'s')+' · until '+new Date(entry.expiresAt).toLocaleString():'Recovery expired · awaiting cleanup'));
             if(remaining)button('Restore item',async()=>{await request('trash-restore',{}, {revision,store:entry.store,id:entry.id});await browse(item);progress('Restored to your cloud collection. Enabled devices receive it on their next sync.');setTimeout(()=>tick(true).catch(()=>{}),0);},card);
             button('Delete permanently',async()=>{if(!confirm('Permanently remove this item from Trash now? Older backups may still hold separate copies.'))return;await request('trash-purge',{}, {revision,store:entry.store,id:entry.id});await request('sync-cleanup',{},{}).catch(()=>{});await browse(item);progress('Removed from Trash. Remaining media cleanup will resume automatically.');},card);
-          }else button(item.sync?'Move to Trash':'Delete item from this backup',async()=>{
+          }else if(store!=='albums')button(item.sync?'Move to Trash':'Delete item from this backup',async()=>{
             if(item.sync){
               if(!confirm('Move this item to Trash? Enabled devices receive the deletion on their next sync. You can restore it for 30 days.'))return;
               const entry=active[index];await request('sync-index',{}, {revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?{store:e.store,id:e.id,deleted:true}:e)});
@@ -413,20 +470,20 @@
             await request('remove-record',{id:item.id},{revision,index});let warning='';try{await cleanup(item.id);}catch{warning=' Use Clean unused media to finish cleanup.';}await browse(item);progress('Deleted from this backup.'+warning);
           },card);
           if(viewId!==libraryView||!section.isConnected)return;
-          items.append(card);
+          items.append(card);if(!window.IntersectionObserver)pumpPreviews();
         }
         if(shown<selected.length){const more=button('Show more items',async()=>{more.remove();await page();},items);}
       }
       async function applyFilter(){
         clearPreviews();items.textContent='';shown=0;const query=search.value.trim().toLowerCase();
-        selected=decoded.filter(x=>(filter.value==='all'||x.store===filter.value)&&(!query||x.search.includes(query)));
-        selected.sort((a,b)=>sort.value==='name'?a.name.localeCompare(b.name):Number(b.value.updatedAt||b.value.createdAt||0)-Number(a.value.updatedAt||a.value.createdAt||0));
+        selected=decoded.filter(x=>(!albumFilter.value||(x.store==='media'&&(albumFilter.value==='unfiled'?!x.value.albumId:x.value.albumId===albumFilter.value)))&&(filter.value==='all'||x.store===filter.value)&&(!query||x.search.includes(query)));
+        selected.sort((a,b)=>sort.value==='name'?a.name.localeCompare(b.name):Number(b.value.updatedAt||b.value.createdAt||0)-Number(a.value.updatedAt||a.value.createdAt||0)||String(a.value.id).localeCompare(String(b.value.id)));
         count.textContent=selected.length+' of '+decoded.length+' items';if(!selected.length)items.append(node('p',item.trash?'Trash is empty or no items match your search.':'No matching items. Try another search or filter.'));await page();
       }
       // Coalesce typing while a media thumbnail is loading, without overlapping renders.
       let rendering=false,pending=false;
       async function refreshFilter(){pending=true;if(rendering)return;rendering=true;try{while(pending){pending=false;await applyFilter();}}catch(e){progress(e.message);}finally{rendering=false;}}
-      search.oninput=refreshFilter;filter.onchange=refreshFilter;sort.onchange=refreshFilter;await refreshFilter();
+      search.oninput=refreshFilter;filter.onchange=refreshFilter;albumFilter.onchange=refreshFilter;sort.onchange=refreshFilter;await refreshFilter();
       if(!item.sync){button('Clean unused media',async()=>{await cleanup(item.id);progress('Unused backup media removed.');},snapshots);button('Delete entire backup',()=>deleteBackup(item),snapshots);}
       progress('Browsing '+manifest.records.length+' items. No local data changed.');
     }
@@ -450,10 +507,10 @@
       if(cursor){const more=button('Load more snapshots',async()=>{more.remove();await loadPage();},snapshots);}
       progress(snapshots.childElementCount?'Choose a snapshot to browse, import or delete.':'No saved snapshots yet.');
     }
-    async function reload(){libraryView++;clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
+    async function reload(){currentBrowsing=null;libraryView++;clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
     list.onclick=()=>run(reload);
     logout.onclick = () => run(async () => {
-      const old = session; session = null; libraryView++; clearPreviews(); snapshots.textContent = '';
+      const old = session; session = null; const db=await bridge.openDB();await window.LoftSnapshotJob.transaction(db,s=>s.delete('snapshot-session-v2')); libraryView++; clearPreviews(); snapshots.textContent = '';
       if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
       syncStatus('Sign in to resume cloud sync.');
       progress('Signed out on this page. Local records are still available behind your local privacy lock.');
@@ -496,14 +553,15 @@
         conflictList.append(box);
       }
     }
-    const listener=()=>{if(section.isConnected)renderSync();else window.removeEventListener('loft-sync-status',listener);};window.addEventListener('loft-sync-status',listener);
+    const dataChanged=()=>{browseDirty=true;};window.addEventListener('loft-data-changed',dataChanged);
+    const listener=()=>{if(section.isConnected){renderSync();if(browseDirty&&!busy&&currentBrowsing?.sync){browseDirty=false;run(()=>browse(currentBrowsing));}}else{window.removeEventListener('loft-sync-status',listener);window.removeEventListener('loft-data-changed',dataChanged);}};window.addEventListener('loft-sync-status',listener);
     bridge.openDB().then(async db=>{auto.enabled=!!(db&&await dbRead(db,'sync-enabled-v1'));auto.loaded=true;syncStatus(auto.enabled?'Automatic sync enabled. Sign in to resume.':'Automatic sync is off.');await tick(true);}).catch(e=>syncStatus(e.message));
     const observer=new MutationObserver(()=>{if(!section.isConnected){libraryView++;clearPreviews();observer.disconnect();}});observer.observe(document.body,{childList:true,subtree:true});
     renderSync();
     display();
     if(bridge.library&&session)run(()=>browse({sync:true}));
   }
-  window.LoftCloud = {mount, status:()=>({signedIn:!!session,enabled:auto.enabled,message:auto.message}),
+  window.LoftCloud = {mount, init, status:()=>({signedIn:!!session,enabled:auto.enabled,message:auto.message}),
     attachHome(element){
       const render=()=>{element.textContent=!session?'Cloud · Sign in to sync':!navigator.onLine?'Cloud · Offline — changes stay on this device':auto.enabled?'Cloud · '+auto.message:'Cloud · Automatic sync paused';};
       window.addEventListener('loft-sync-status',render);window.addEventListener('online',render);window.addEventListener('offline',render);render();

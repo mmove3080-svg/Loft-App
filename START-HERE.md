@@ -1,5 +1,7 @@
 # Loft redesign — start here
 
+For the current media and snapshot update, start with [UPDATE-GUIDE.md](UPDATE-GUIDE.md).
+
 This is an update for your existing Loft-App GitHub repository. It is ready for a **preview deployment and your phone check**. It has not been uploaded or deployed for you.
 
 ## Upload the update

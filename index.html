@@ -641,9 +641,11 @@ button.set-row:active{background:rgba(120,120,128,.12)}
 <script src="sync-engine.js"></script>
 <script src="sha256.js"></script>
 <script src="integrity.js"></script>
+<script src="snapshot-job.js"></script>
 <script src="cloud.js"></script>
 <script src="media-store.js"></script>
 <script src="media-export.js"></script>
+<script src="media-viewer.js"></script>
 <script src="photos-ui.js"></script>
 <script src="notes-ui.js"></script>
 <script>
@@ -696,7 +698,7 @@ function dur(s){s=Math.round(s||0);var m=Math.floor(s/60);return m+':'+(s%60<10?
 
 /* ------------------------------- storage --------------------------------- */
 /* IndexedDB for media + records; a memory shim if IDB is unavailable. */
-var DBNAME='home-screen', DBVER=1, STORES=['media','notes','chats','contacts','kv'], dbp=null, memfall=null;
+var DBNAME='home-screen', DBVER=2, STORES=['media','notes','chats','contacts','albums','kv'], dbp=null, memfall=null;
 
 function openDB(){
   if(dbp)return dbp;
@@ -712,9 +714,12 @@ function openDB(){
         }
       });
     };
-    r.onsuccess=function(){res(r.result)};
+    r.onsuccess=function(){var notice=document.getElementById('loft-upgrade-notice');if(notice)notice.remove();r.result.onversionchange=function(){r.result.close();dbp=null;};res(r.result)};
     r.onerror=function(){rej(r.error)};
-    r.onblocked=function(){rej(new Error('blocked'))};
+    r.onblocked=function(){
+      if(document.getElementById('loft-upgrade-notice'))return;
+      var notice=document.createElement('div');notice.id='loft-upgrade-notice';notice.setAttribute('role','alert');notice.style.cssText='position:fixed;inset:12px 12px auto;z-index:99999;padding:18px;border-radius:12px;background:#fff;color:#111;box-shadow:0 4px 24px #0005';notice.textContent='Close other Loft tabs to finish this update. Your saved data is preserved.';document.body.appendChild(notice);
+    };
   }).catch(function(){ memfall=memfall||{}; STORES.forEach(function(n){memfall[n]=new Map()}); return null; });
   return dbp;
 }
@@ -1731,9 +1736,10 @@ REG.cloud={
   mount:function(api){
     api.root.appendChild(el('div','safetop'));
     var scroll=el('div','scroll');api.root.appendChild(scroll);api.root.appendChild(el('div','safebot'));
-    window.LoftCloud.mount(scroll,{library:true,openDB:openDB,canSync:function(){return !mediaStore.state.running&&(!current||current.id==='settings'||current.id==='cloud');},refresh:function(){refreshHomeMedia();}});
+    window.LoftCloud.mount(scroll,{library:true,openDB:openDB,canSync:function(){return !mediaStore.state.running&&(!current||current.id==='settings'||current.id==='cloud');},refresh:function(){refreshHomeMedia();window.dispatchEvent(new Event("loft-data-changed"));}});
   }
 };
+window.LoftCloud.init({openDB:openDB,canSync:function(){return !mediaStore.state.running&&(!current||current.id==='settings'||current.id==='cloud');},refresh:function(){refreshHomeMedia();window.dispatchEvent(new Event('loft-data-changed'));}});
 window.LoftCloud.attachHome(document.getElementById('home-cloud-status'));
 REG.settings={
   title:'Settings',

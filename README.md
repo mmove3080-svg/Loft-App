@@ -1,5 +1,7 @@
 # Home — an iOS-style Home Screen for the web
 
+For the current media and snapshot update, start with [UPDATE-GUIDE.md](UPDATE-GUIDE.md).
+
 A high-fidelity recreation of the attached reference Home Screen, built as a responsive
 web app and installable PWA. No frameworks, no build step, no external assets, and no
 network requests at runtime — the whole interface is one HTML file.
