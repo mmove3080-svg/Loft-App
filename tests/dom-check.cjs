@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const {webcrypto}=require('node:crypto');
 (async()=>{
  const dom=new JSDOM('<main></main>',{url:'https://loft.test',runScripts:'outside-only'}), w=dom.window;
- w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
+ w.setInterval=()=>0;w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
  const manifests=new Map(), parts=new Map();let corrupt=false;
  w.fetch=async(url,opts={})=>{
   const u=new URL(url,'https://loft.test'),action=u.searchParams.get('action'),id=u.searchParams.get('id'),part=u.searchParams.get('part');
@@ -25,13 +25,13 @@ const {webcrypto}=require('node:crypto');
   }
   throw new Error('Unexpected route');
  };
- w.eval(fs.readFileSync(require('node:path').join(__dirname,'../cloud.js'),'utf8'));
- const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('test',1);r.onupgradeneeded=()=>['media','notes','contacts','chats','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+ Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('test',1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
  const write=fn=>new Promise((resolve,reject)=>{const t=db.transaction(['notes','media'],'readwrite');fn(t);t.oncomplete=resolve;t.onerror=()=>reject(t.error);});
  await write(t=>{t.objectStore('notes').put({id:'note-1',text:'Original cloud text'});t.objectStore('media').put({id:'photo-1',name:'test.png',blob:new Blob(['media-bytes'],{type:'image/png'})});});
  w.LoftCloud.mount(w.document.querySelector('main'),{openDB:async()=>db,refresh:()=>{}});
  const button=name=>[...w.document.querySelectorAll('button')].find(b=>b.textContent.startsWith(name));
- const wait=async text=>{for(let i=0;i<200;i++){const s=w.document.querySelector('[role=status]').textContent;if(s.includes(text)&&![...w.document.querySelectorAll('button')].some(b=>b.disabled))return;await new Promise(r=>setTimeout(r,10));}throw new Error('Expected '+text+'; saw '+w.document.querySelector('[role=status]').textContent);};
+ const wait=async text=>{for(let i=0;i<200;i++){const s=w.document.querySelector('.cloud-panel > [role=status]').textContent;if(s.includes(text)&&![...w.document.querySelectorAll('button')].some(b=>b.disabled))return;await new Promise(r=>setTimeout(r,10));}throw new Error('Expected '+text+'; saw '+w.document.querySelector('.cloud-panel > [role=status]').textContent);};
  w.document.querySelector('input[type=email]').value='owner@example.com';w.document.querySelector('input[type=password]').value='password';w.document.querySelector('form').dispatchEvent(new w.Event('submit',{cancelable:true}));
  await wait('Signed in.');button('Save snapshot').click();await wait('Saved 2 records');assert.equal(manifests.size,1);assert.equal(parts.size,1);
  await write(t=>{t.objectStore('notes').put({id:'note-1',text:'Newer local text'});t.objectStore('media').delete('photo-1');});

@@ -12,9 +12,9 @@ This update adds a Cloud Storage section to the existing app's Settings. It keep
 - Skip identical existing records. Preserve differing records with the same ID by adding a separate cloud copy. No import deletes or replaces existing local records.
 - Cache only the public application shell for offline use. API calls and private data never enter the service worker cache.
 
-This is MANUAL cloud transfer, not automatic background synchronization. After editing, use Save snapshot. On another device, sign in and import that snapshot. Local deletions are not applied to other devices. Old snapshots continue to contain old versions until you remove them from R2. Each save uploads a complete snapshot and therefore consumes additional storage. Interrupted uploads may leave unlisted parts in R2; a retry creates a new snapshot.
+Dated snapshots are separate from the automatic sync described in AUTO-SYNC.md. After editing, use Save snapshot. On another device, sign in and import that snapshot. Local deletions are not applied to other devices. Old snapshots continue to contain old versions until you remove them from R2. Each save uploads a complete snapshot and therefore consumes additional storage. Interrupted saves retain a persistent queue and resume the same snapshot; see UPDATE-GUIDE.md.
 
-The local passcode, appearance preferences, and phone call history are device-specific and are not included. Saved conversations are personal records, not messages delivered to other people. Cloud login tokens stay in memory; after closing or reloading the page, sign in again. The app's local privacy lock remains separate from cloud login.
+The local passcode, appearance preferences, and phone call history are device-specific and are not included. Saved conversations are personal records, not messages delivered to other people. Cloud login tokens normally stay in memory. While a snapshot is unfinished, its session is saved on this device to allow automatic resume; completion or signing out removes that saved session. The app's local privacy lock remains separate from cloud login.
 
 ## Before deployment
 
@@ -50,7 +50,7 @@ Config is suitable for non-secret values. Saving those as Secret also works. No 
 
 1. Keep all original local records. Add a disposable test note and small test image.
 2. Sign in under Cloud Storage with your Supabase app user's email/password (not the database password).
-3. Click Save snapshot and wait for the saved-record confirmation. Keep the page open during transfers.
+3. Click Save snapshot and wait for the saved-record confirmation. Snapshot saves checkpoint automatically and resume when the app can run again; imports still require an active page.
 4. On another device, open the same app URL, go to Settings, sign in, click Show saved snapshots, then import the saved snapshot.
 5. Confirm the test note and image are available. Also check existing records remain on the original device.
 6. Test a differing record on the second device: importing an older version should preserve the local version and create a cloud copy.
@@ -62,10 +62,10 @@ Code checks passed locally, including authentication/owner rejection and an inte
 
 Uploads use 1 MiB parts through Vercel so individual requests fit the function payload limit. This is slower than direct multipart upload for large videos. Snapshot metadata is limited to 3 MB. Imports assemble the snapshot before writing; a very large library may exceed device memory or browser storage quota. If quota, network, or integrity checks fail, existing local records remain. Start with a small snapshot and keep originals until you verify the other device.
 
-If a save fails, the snapshot is not listed unless the final manifest was stored. If the final response was lost, check the snapshot list before retrying. If an import says already imported, it intentionally avoids importing the same snapshot twice on the same device.
+If a save fails, the snapshot is not listed unless the final manifest was stored. If the final response was lost, the same commit is safely retried on resume. If an import says already imported, it intentionally avoids importing the same snapshot twice on the same device.
 
 This version does not include an in-app password-reset flow. Keep the cloud password in your password manager; an administrator can manage the owner account through Supabase. Never put a secret key into frontend code to implement recovery.
 
 ## Verification for developers
 
-Run `npm ci` and `npm test` for server access-control checks. For the simulated interface and IndexedDB test, install `jsdom` and `fake-indexeddb` in a development environment and run `node tests/dom-check.cjs`. Its cloud responses are simulated; it is not a real-browser or live-provider test. A real-browser check could not run here because the Chromium download timed out.
+Run `npm ci` and `npm test` for server access-control checks. For the simulated interface and IndexedDB test, install `jsdom` and `fake-indexeddb` in a development environment and run `node tests/dom-check.cjs`. Its cloud responses are simulated; it is not a real-browser or live-provider test. The current update also includes mobile Chromium checks; see UPDATE-GUIDE.md for results and the physical iPhone checklist.

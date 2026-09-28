@@ -14,7 +14,7 @@ async function device(name){
  w.URL.createObjectURL=()=> 'blob:preview';w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.lastDownload=this.download;};w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
  w.setInterval=()=>0;Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});
  let online=true,safe=true,race=null;Object.defineProperty(w.navigator,'onLine',{get:()=>online});
- const db=await new Promise((resolve,reject)=>{const r=new IDBFactory().open(name,1);r.onupgradeneeded=()=>['media','notes','contacts','chats','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+ const db=await new Promise((resolve,reject)=>{const r=new IDBFactory().open(name,1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
  w.fetch=async(url,opts={})=>{if(!online)throw Error('offline');const u=new URL(url,'https://loft.test'),a=u.searchParams.get('action'),id=u.searchParams.get('id'),part=u.searchParams.get('part');const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json'}});
  if(u.pathname==='/auth/v1/token')return json({access_token:'test',refresh_token:'refresh',expires_in:3600});
  if(a==='config')return json({url:'https://example.supabase.co',publishableKey:'public'});
@@ -24,7 +24,7 @@ async function device(name){
  if(a==='sync-part'){const key='owner/sync/parts/'+id+'/'+part;if(opts.method==='POST'){files.set(key,Buffer.from(JSON.parse(opts.body).data,'base64'));partUploads++;return json({saved:true});}return new Response(files.get(key));}
  throw Error(a);
  };
- w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('media-viewer.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
  w.LoftCloud.mount(w.document.querySelector('main'),{openDB:async()=>db,canSync:()=>safe,refresh:()=>{}});
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
  const status=()=>[...w.document.querySelectorAll('[role=status]')].map(e=>e.textContent).join('|');
@@ -40,14 +40,14 @@ async function device(name){
  a.button('Enable automatic sync').click();await a.wait('Up to date');a.button('Pause automatic sync').click();await a.wait('Automatic sync is off.');
  const waitFor=async fn=>{for(let i=0;i<500;i++){if(fn())return;await new Promise(r=>setTimeout(r,5));}throw Error('Timed out: '+a.status());};
  const click=async label=>{assert(a.button(label),'button '+label);a.button(label).click();await waitFor(()=>!a.button(label)?.disabled);};
- await click('Collection');assert.equal(a.w.document.querySelectorAll('.library-card').length,4);assert(a.w.document.querySelector('.library-thumb img'));
+ await click('Collection');assert.equal(a.w.document.querySelectorAll('.library-card').length,4);await waitFor(()=>a.w.document.querySelector('.library-thumb img'));
  const search=a.w.document.querySelector('input[type=search]');search.value='Monday';search.dispatchEvent(new a.w.Event('input'));await waitFor(()=>a.w.document.querySelectorAll('.library-card').length===1);assert(a.w.document.querySelector('.library-card').textContent.includes('Sam'));
  search.value='12345';search.dispatchEvent(new a.w.Event('input'));await waitFor(()=>a.w.document.querySelector('.library-card')?.textContent.includes('Alex'));
  await click('Download text');assert.equal(a.w.lastDownload,'Alex.txt');await click('Export matching records');assert.equal(a.w.lastDownload,'loft-library-export.json');
  await click('Move to Trash');await waitFor(()=>a.status().includes('Moved to Trash'));assert.equal((await a.get('contacts','c')).name,'Alex','browsing deletion does not mutate local IDB outside sync');
  await click('Trash');assert(a.button('Restore item'));assert(a.w.document.body.textContent.includes('30 more days'));
  await click('Restore item');await waitFor(()=>a.status().includes('Restored to'));assert.equal(a.w.document.querySelectorAll('.library-card').length,0);
- await click('Collection');assert.equal(a.w.document.querySelectorAll('.library-card').length,4);await click('View photo / play video');assert(a.w.document.querySelector('dialog img'));
+ await click('Collection');assert.equal(a.w.document.querySelectorAll('.library-card').length,4);await click('View photo / play video');assert(a.w.document.querySelector('.media-viewer img'));
  await click('Download original');assert.equal(a.w.lastDownload,'test.png');
  await click('Storage');assert(a.w.document.body.textContent.includes('300 B'));assert(a.w.document.body.textContent.includes('Saved backups'));
  console.log('PASS: unified search, thumbnails, media dialog, original and text downloads, export, Trash/restore, storage totals; local records preserved.');

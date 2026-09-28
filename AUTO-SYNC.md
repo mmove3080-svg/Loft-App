@@ -28,7 +28,7 @@ If the same item has different versions and there is no shared baseline, sync pa
 - Changes made offline stay locally. Reconnect and return to Home or Settings to sync.
 - Closing the app or signing out stops sync. Sign in again after reopening; tokens are not persistently stored.
 - Sync now triggers a check. Pause automatic sync pauses this device. The enabled setting is saved locally.
-- Web Locks support is required for safe coordination between tabs. Unsupported browsers retain manual snapshot features.
+- Web Locks support is required for safe coordination between tabs. Resumable snapshots also require Web Locks; update the browser if this feature is unavailable.
 
 ## Deletions and backups
 

@@ -14,7 +14,7 @@ async function device(name){
  w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
  w.setInterval=()=>0;Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});
  let online=true,safe=true,race=null;Object.defineProperty(w.navigator,'onLine',{get:()=>online});
- const db=await new Promise((resolve,reject)=>{const r=new IDBFactory().open(name,1);r.onupgradeneeded=()=>['media','notes','contacts','chats','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+ const db=await new Promise((resolve,reject)=>{const r=new IDBFactory().open(name,1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
  w.fetch=async(url,opts={})=>{if(!online)throw Error('offline');const u=new URL(url,'https://loft.test'),a=u.searchParams.get('action'),id=u.searchParams.get('id'),part=u.searchParams.get('part');const json=(v,status=200)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json'}});
  if(u.pathname==='/auth/v1/token')return json({access_token:'test',refresh_token:'refresh',expires_in:3600});
  if(a==='config')return json({url:'https://example.supabase.co',publishableKey:'public'});
@@ -23,7 +23,7 @@ async function device(name){
  if(a==='sync-part'){const key='owner/sync/parts/'+id+'/'+part;if(opts.method==='POST'){files.set(key,Buffer.from(JSON.parse(opts.body).data,'base64'));partUploads++;return json({saved:true});}return new Response(files.get(key));}
  throw Error(a);
  };
- w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
  w.LoftCloud.mount(w.document.querySelector('main'),{openDB:async()=>db,canSync:()=>safe,refresh:()=>{}});
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
  const status=()=>[...w.document.querySelectorAll('[role=status]')].map(e=>e.textContent).join('|');
@@ -38,6 +38,8 @@ async function device(name){
  const a=await device('A');await a.write('notes',{id:'n',text:'first'});await a.write('media',{id:'p',name:'p.png',blob:new Blob(['photo'],{type:'image/png'})});a.button('Enable automatic sync').click();await a.wait('Up to date');assert.equal(partUploads,1);
  const b=await device('B');b.button('Enable automatic sync').click();await b.wait('Up to date');assert.equal((await b.get('notes','n')).text,'first');assert.equal(await (await b.get('media','p')).blob.text(),'photo');
  await a.sync();assert.equal(partUploads,1,'unchanged media not uploaded again');
+ await a.write('albums',{id:'family',name:'Family'});await a.write('albums',{id:'travel',name:'Travel'});await a.write('media',{...(await a.get('media','p')),albumId:'family'});await a.sync();await b.sync();assert.equal((await b.get('media','p')).albumId,'family');assert.equal((await b.get('albums','family')).name,'Family');assert.equal(partUploads,1,'album assignment must reuse cloud original');
+ await b.write('media',{...(await b.get('media','p')),albumId:'travel'});await b.sync();await a.sync();assert.equal((await a.get('media','p')).albumId,'travel');assert.equal(partUploads,1,'album move must not duplicate cloud original');
  b.online(false);await b.write('notes',{id:'n',text:'offline edit'});await b.sync('Offline.');assert.equal((await b.get('notes','n')).text,'offline edit');b.online(true);await b.sync();await a.sync();assert.equal((await a.get('notes','n')).text,'offline edit');
  await a.write('notes',{id:'n',text:'A edit'});await b.write('notes',{id:'n',text:'B edit'});await a.sync();await b.sync('conflicting item');assert.equal((await b.get('notes','n')).text,'B edit');b.button('Keep this device’s version').click();await new Promise(r=>setTimeout(r,30));await b.wait('Up to date');await a.sync();assert.equal((await a.get('notes','n')).text,'B edit');
  b.safe(false);await a.write('notes',{id:'n',text:'new incoming'});await a.sync();await b.sync('return to Home');assert.equal((await b.get('notes','n')).text,'B edit');b.safe(true);await b.sync();assert.equal((await b.get('notes','n')).text,'new incoming');
