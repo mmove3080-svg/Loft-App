@@ -1,8 +1,15 @@
 const {JSDOM}=require('jsdom'),{IDBFactory}=require('fake-indexeddb'),fs=require('fs'),assert=require('node:assert/strict'),{webcrypto}=require('node:crypto');
 const {syncIndex}=require('../lib/sync');
+const {transfer}=require('../lib/manifest-transfer');
 const files=new Map(),versions=new Map();let serial=0,partUploads=0;
 const s3={send:async c=>{const a=c.input,n=c.constructor.name;
- if(n==='GetObjectCommand'){if(!files.has(a.Key))throw Object.assign(Error('missing'),{name:'NoSuchKey'});return {ETag:versions.get(a.Key),Body:{transformToByteArray:async()=>Buffer.from(files.get(a.Key))}};}
+ if(n==='HeadObjectCommand'||n==='GetObjectCommand'){
+  if(!files.has(a.Key))throw Object.assign(Error('missing'),{name:'NoSuchKey'});
+  if(a.IfMatch&&a.IfMatch!==versions.get(a.Key))throw Object.assign(Error('changed'),{status:409});
+  let bytes=Buffer.from(files.get(a.Key));if(n==='HeadObjectCommand')return {ETag:versions.get(a.Key),ContentLength:bytes.length};
+  if(a.Range){const [,start,end]=/bytes=(\d+)-(\d+)/.exec(a.Range);bytes=bytes.subarray(+start,+end+1);}
+  return {ETag:versions.get(a.Key),Body:{transformToByteArray:async()=>bytes}};
+ }
  if(n==='PutObjectCommand'){if((a.IfMatch&&a.IfMatch!==versions.get(a.Key))||(a.IfNoneMatch==='*'&&files.has(a.Key)))throw Object.assign(Error('changed'),{status:409});files.set(a.Key,a.Body);const ETag=String(++serial);versions.set(a.Key,ETag);return {ETag};}
  if(n==='ListObjectsV2Command')return {Contents:[...files.keys()].filter(k=>k.startsWith(a.Prefix)).slice(0,a.MaxKeys).map(Key=>({Key}))};
  if(n==='DeleteObjectsCommand'){for(const x of a.Delete.Objects){files.delete(x.Key);versions.delete(x.Key);}return {};}
@@ -11,7 +18,7 @@ const s3={send:async c=>{const a=c.input,n=c.constructor.name;
 const devices=[];
 async function device(name){
  const dom=new JSDOM('<main></main>',{url:'https://loft.test',runScripts:'outside-only'}),w=dom.window;devices.push(dom);
- w.URL.createObjectURL=()=> 'blob:preview';w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.lastDownload=this.download;};w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
+ w.URL.createObjectURL=()=> 'blob:preview';w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.lastDownload=this.download;};w.Response=Response;w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;
  w.setInterval=()=>0;Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});
  let online=true,safe=true,race=null;Object.defineProperty(w.navigator,'onLine',{get:()=>online});
  const db=await new Promise((resolve,reject)=>{const r=new IDBFactory().open(name,1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
@@ -19,8 +26,15 @@ async function device(name){
  if(u.pathname==='/auth/v1/token')return json({access_token:'test',refresh_token:'refresh',expires_in:3600});
  if(a==='config')return json({url:'https://example.supabase.co',publishableKey:'public'});
  assert.equal(opts.headers.Authorization,'Bearer test');if(a==='session')return json({owner:true});
+ if(['sync-index-info','sync-index-page','sync-index-chunk','sync-index-finalize'].includes(a)){
+  try{const result=await transfer({s3,Bucket:'b',prefix:'owner/',sync:true,action:a.slice(5),method:opts.method,query:Object.fromEntries(u.searchParams),body:opts.body?JSON.parse(opts.body):undefined});
+   if(a==='sync-index-page'&&race){const fn=race;race=null;await fn();}return json(result);
+  }catch(e){return json({error:e.message},e.status||503);}
+ }
+
  if(['sync-index','sync-cleanup','trash-restore','trash-purge'].includes(a)){try{const answer=await syncIndex({s3,Bucket:'b',prefix:'owner/',method:opts.method,body:opts.body?JSON.parse(opts.body):undefined,cleanup:a==='sync-cleanup',operation:a==='trash-restore'?'restore':a==='trash-purge'?'purge':undefined});if(a==='sync-index'&&opts.method==='GET'&&race){const fn=race;race=null;await fn();}return json(answer);}catch(e){return json({error:e.message},e.status||503);}}
  if(a==='storage-usage')return json({totals:{sync:100,backups:200,other:0,objects:3},cursor:null});
+ if(a==='sync-part-status'){const bytes=files.get('owner/sync/parts/'+id+'/'+part);return json(bytes?{exists:true,hash:require('node:crypto').createHash('sha256').update(bytes).digest('hex'),size:bytes.length}:{exists:false});}
  if(a==='sync-part'){const key='owner/sync/parts/'+id+'/'+part;if(opts.method==='POST'){files.set(key,Buffer.from(JSON.parse(opts.body).data,'base64'));partUploads++;return json({saved:true});}return new Response(files.get(key));}
  throw Error(a);
  };
@@ -29,7 +43,7 @@ async function device(name){
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
  const status=()=>[...w.document.querySelectorAll('[role=status]')].map(e=>e.textContent).join('|');
  const wait=async text=>{for(let i=0;i<500;i++){if(status().includes(text)&&!button('Pause automatic sync')?.disabled)return;await new Promise(r=>setTimeout(r,5));}throw Error(name+' expected '+text+' saw '+status());};
- await new Promise(r=>setTimeout(r,10));w.document.querySelector('input[type=email]').value='owner@example.com';w.document.querySelector('input[type=password]').value='password';w.document.querySelector('form').dispatchEvent(new w.Event('submit',{cancelable:true}));await wait('Signed in.');
+ await new Promise(r=>setTimeout(r,10));w.document.querySelector('input[type=email]').value='owner@example.com';w.document.querySelector('input[type=password]').value='password';w.document.querySelector('form').dispatchEvent(new w.Event('submit',{cancelable:true}));await wait('Signed in.');await new Promise(r=>setTimeout(r,30));
  const write=(store,value,del=false)=>new Promise((resolve,reject)=>{const tx=db.transaction([store,'kv'],'readwrite');if(del)tx.objectStore(store).delete(value);else tx.objectStore(store).put(value);const r=tx.objectStore('kv').get('sync-local-revision');r.onsuccess=()=>tx.objectStore('kv').put((r.result||0)+1,'sync-local-revision');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
  const get=(store,id)=>new Promise(r=>{const q=db.transaction(store).objectStore(store).get(id);q.onsuccess=()=>r(q.result);});
  const sync=async(text='Up to date')=>{button('Sync now').click();await new Promise(r=>setTimeout(r,30));await wait(text);};

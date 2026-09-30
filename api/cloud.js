@@ -34,6 +34,7 @@ module.exports = async function handler(req, res) {
       const result = await s3.send(new ListObjectsV2Command({Bucket, Prefix: prefix + 'commits/', MaxKeys: 100, ContinuationToken: token || undefined}));
       return res.status(200).json({items: (result.Contents || []).map(x => ({id: x.Key.slice((prefix+'commits/').length).replace(/\.json$/, ''), savedAt: x.LastModified})), cursor: result.NextContinuationToken || null});
     }
+    if(['sync-index-info','sync-index-page','sync-index-chunk','sync-index-finalize'].includes(action))return res.status(200).json(await require('../lib/manifest-transfer').transfer({s3,Bucket,prefix,sync:true,action:action.slice(5),method:req.method,query:req.query,body:req.body}));
     if(['sync-index','sync-cleanup','trash-restore','trash-purge'].includes(action)){
       let body=req.body;
       if(typeof body==='string'){try{body=JSON.parse(body);}catch{throw new HttpError(400,'Invalid JSON.');}}
@@ -41,8 +42,8 @@ module.exports = async function handler(req, res) {
     }
     const id = snapshotId(req.query.id);
     if(['index-chunk','index-finalize','index-info','index-page'].includes(action))return res.status(200).json(await require('../lib/manifest-transfer').transfer({s3,Bucket,prefix,id,action,method:req.method,query:req.query,body:req.body}));
-    if(action==='part-status'&&req.method==='GET'){
-      try{const r=await s3.send(new HeadObjectCommand({Bucket,Key:prefix+'parts/'+id+'/'+partId(req.query.part)}));return res.status(200).json({exists:true,hash:r.Metadata?.sha256,size:r.ContentLength});}
+    if((action==='part-status'||action==='sync-part-status')&&req.method==='GET'){
+      try{const r=await s3.send(new HeadObjectCommand({Bucket,Key:prefix+(action==='sync-part-status'?'sync/parts/':'parts/')+id+'/'+partId(req.query.part)}));return res.status(200).json({exists:true,hash:r.Metadata?.sha256,size:r.ContentLength});}
       catch(e){if(e.$metadata?.httpStatusCode===404)return res.status(200).json({exists:false});throw e;}
     }
     if (['browse','remove-record','cleanup','delete-snapshot'].includes(action)) {
