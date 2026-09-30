@@ -25,7 +25,7 @@ const {webcrypto}=require('node:crypto');
   }
   throw new Error('Unexpected route');
  };
- Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});w.eval(fs.readFileSync('snapshot-transfer.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
  const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('test',1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
  const write=fn=>new Promise((resolve,reject)=>{const t=db.transaction(['notes','media'],'readwrite');fn(t);t.oncomplete=resolve;t.onerror=()=>reject(t.error);});
  await write(t=>{t.objectStore('notes').put({id:'note-1',text:'Original cloud text'});t.objectStore('media').put({id:'photo-1',name:'test.png',blob:new Blob(['media-bytes'],{type:'image/png'})});});

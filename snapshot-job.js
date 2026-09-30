@@ -41,7 +41,7 @@ async function run(db,io){
    await transaction(db,s=>{s.put(job,KEY);s.delete(ROW+(job.index-1));});notify();
   }
   const manifest={version:1,createdAt:job.createdAt,parts:job.part,records:job.encoded};
-  if(new Blob([JSON.stringify(manifest)]).size>3000000)throw new Error('Snapshot metadata exceeds the 3 MB limit.');
+  job.state='finalizing';await checkpoint();notify();
   await io.commit(job.id,manifest);
   job.state='complete';await transaction(db,s=>{s.put({...job,encoded:[],blobs:[]},'snapshot-last-v2');s.delete(KEY);s.delete('snapshot-session-v2');});notify();return job;
  }catch(e){job.state='paused';job.error=e.message;try{await checkpoint();}catch{}notify();throw e;}
