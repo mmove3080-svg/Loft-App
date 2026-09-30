@@ -11,7 +11,7 @@ function device(){const dom=new JSDOM('<main></main>',{url:'https://loft.test',r
   if(a==='part'){const b=Buffer.from(JSON.parse(opts.body).data,'base64');parts.set(part,b);uploads.push(part);if(part===2&&loss){loss=false;online=false;throw Error('Lost response');}return json({saved:true});}
   if(a==='commit'){manifest=JSON.parse(opts.body);return json({saved:true});}throw Error(a);
  };
- for(const name of ['snapshot-job.js','cloud.js'])w.eval(fs.readFileSync(name,'utf8'));
+ for(const name of ['snapshot-transfer.js','snapshot-job.js','cloud.js'])w.eval(fs.readFileSync(name,'utf8'));
  const bridge={openDB:async()=>db,canSync:()=>false,refresh(){}};return {w,dom,bridge};}
 let d=device();d.w.LoftCloud.mount(d.w.document.querySelector('main'),d.bridge);const form=d.w.document.querySelector('form');form.querySelector('[type=email]').value='owner@example.com';form.querySelector('[type=password]').value='test';form.dispatchEvent(new d.w.Event('submit',{cancelable:true}));await pause(30);[...d.w.document.querySelectorAll('button')].find(b=>b.textContent==='Save snapshot').click();
 for(let i=0;i<300;i++){if(d.w.document.body.textContent.includes('Lost response'))break;await pause(10);}

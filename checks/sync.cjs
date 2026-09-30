@@ -23,7 +23,7 @@ async function device(name){
  if(a==='sync-part'){const key='owner/sync/parts/'+id+'/'+part;if(opts.method==='POST'){files.set(key,Buffer.from(JSON.parse(opts.body).data,'base64'));partUploads++;return json({saved:true});}return new Response(files.get(key));}
  throw Error(a);
  };
- w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ w.eval(fs.readFileSync('sync-engine.js','utf8'));w.eval(fs.readFileSync('snapshot-transfer.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
  w.LoftCloud.mount(w.document.querySelector('main'),{openDB:async()=>db,canSync:()=>safe,refresh:()=>{}});
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
  const status=()=>[...w.document.querySelectorAll('[role=status]')].map(e=>e.textContent).join('|');

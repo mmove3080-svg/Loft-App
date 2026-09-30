@@ -102,7 +102,7 @@
     if(db&&await dbRead(db,'snapshot-job-v2'))await window.LoftSnapshotJob.transaction(db,s=>s.put(session,'snapshot-session-v2'));
   }
   function snapshotProgress(state){snapshotState=state;window.dispatchEvent(new Event('loft-snapshot-status'));}
-  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
+  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
   async function save(bridge, progress, createNew=true){
     const db=await bridge.openDB(),engine=window.LoftSnapshotJob;
     if(!db)throw new Error('Persistent local storage is unavailable.');
@@ -119,7 +119,7 @@
           progress:s=>{snapshotProgress(s);if(progress)progress(snapshotMessage(s));},
           exists:async(id,p)=>{const r=await(await request('part-status',{id,part:String(p.number)})).json();if(r.exists&&(r.hash!==p.hash||r.size!==p.size))throw new Error('Saved upload part does not match.');return r.exists;},
           upload:async(id,p,blob)=>request('part',{id,part:String(p.number)},{data:base64(new Uint8Array(await blob.arrayBuffer()))}),
-          commit:(id,manifest)=>request('commit',{id},manifest)
+          commit:(id,manifest)=>window.LoftSnapshotTransfer.commit(id,manifest,{request,hash})
         });
       }finally{snapshotRunning=false;window.dispatchEvent(new Event('loft-snapshot-status'));}
     };
@@ -147,7 +147,7 @@
     if (!db) throw new Error('Persistent local storage is unavailable.');
     const prior = await new Promise((resolve, reject) => {const r = db.transaction('kv').objectStore('kv').get('cloud-import:' + id); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);});
     if (prior) throw new Error('This snapshot has already been imported on this device.');
-    const manifest = await (await request('commit', {id})).json();
+    const {manifest} = await window.LoftSnapshotTransfer.read(id,request);
     if(manifest.deleting)throw new Error('This backup is being deleted.');
     if (manifest.version !== 1 || !Array.isArray(manifest.records)) throw new Error('Unsupported snapshot.');
     const decoded = [];
@@ -381,7 +381,7 @@
       currentBrowsing=item;
       const viewId=++libraryView;
       clearPreviews();snapshots.textContent='';progress('Loading library…');
-      const data=await(await(item.sync?request('sync-index'):request('browse',{id:item.id}))).json();
+      const data=item.sync?await(await request('sync-index')).json():await window.LoftSnapshotTransfer.read(item.id,request);
       const active=item.sync?(item.trash?data.trash||[]:data.entries.filter(e=>!e.deleted)):null;
       const manifest=item.sync?{records:active.map(e=>({store:e.store,value:e.value})),createdAt:Date.now()}:data.manifest,revision=data.revision;
       snapshots.append(node('h3',item.trash?'Trash · 30-day recovery':item.sync?'Your cloud collection':'Saved backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
@@ -489,7 +489,7 @@
     }
     async function deleteBackup(item){
       if(!confirm('Permanently delete this ENTIRE cloud backup and its media? Local device copies and other backups remain. This cannot be undone.'))return;
-      const {revision}=await (await request('browse',{id:item.id})).json();
+      const {revision}=await (await request('index-info',{id:item.id})).json();
       let done=false;
       while(!done){progress('Deleting backup files… Keep this page open. If interrupted, use Delete entire backup again to resume.');done=(await (await request('delete-snapshot',{id:item.id},{revision})).json()).done;}
       await reload();progress('Cloud backup deleted. Local copies and other backups remain.');

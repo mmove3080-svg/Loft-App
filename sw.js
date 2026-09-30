@@ -1,9 +1,10 @@
 /* Only public app assets enter this cache. IndexedDB is never cleared here. */
-const VERSION = 'loft-public-v12';
+const VERSION = 'loft-public-v13';
 const SHELL = [
   './',
   './cloud.js',
   './snapshot-job.js',
+  './snapshot-transfer.js',
   './library.css',
   './refined.css',
   './sha256.js',

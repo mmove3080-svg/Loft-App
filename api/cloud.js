@@ -40,6 +40,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json(await syncIndex({s3,Bucket,prefix,method:req.method,body,cleanup:action==='sync-cleanup',operation:action==='trash-restore'?'restore':action==='trash-purge'?'purge':undefined}));
     }
     const id = snapshotId(req.query.id);
+    if(['index-chunk','index-finalize','index-info','index-page'].includes(action))return res.status(200).json(await require('../lib/manifest-transfer').transfer({s3,Bucket,prefix,id,action,method:req.method,query:req.query,body:req.body}));
     if(action==='part-status'&&req.method==='GET'){
       try{const r=await s3.send(new HeadObjectCommand({Bucket,Key:prefix+'parts/'+id+'/'+partId(req.query.part)}));return res.status(200).json({exists:true,hash:r.Metadata?.sha256,size:r.ContentLength});}
       catch(e){if(e.$metadata?.httpStatusCode===404)return res.status(200).json({exists:false});throw e;}

@@ -19,6 +19,8 @@ const {webcrypto}=require('node:crypto');
    if(opts.method==='POST'){parts.set(id+'/'+part,Buffer.from(JSON.parse(opts.body).data,'base64'));return json({saved:true});}
    return new Response(corrupt?Buffer.from('broken'):parts.get(id+'/'+part));
   }
+  if(action==='index-info')return json({size:Buffer.byteLength(JSON.stringify(manifests.get(id))),revision:'rev',chunkSize:1048576});
+  if(action==='index-page'){const b=Buffer.from(JSON.stringify(manifests.get(id))),start=Number(u.searchParams.get('page'))*1048576;return json({data:b.subarray(start,start+1048576).toString('base64')});}
   if(action==='browse')return json({manifest:manifests.get(id),revision:'rev'});
   if(action==='remove-record'){manifests.get(id).records.splice(JSON.parse(opts.body).index,1);return json({removed:true});}
   if(action==='cleanup')return json({cursor:null});
@@ -30,7 +32,7 @@ const {webcrypto}=require('node:crypto');
   throw new Error('Unexpected route');
  };
  Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({name:n})}});
- w.eval(fs.readFileSync('media-viewer.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
+ w.eval(fs.readFileSync('media-viewer.js','utf8'));w.eval(fs.readFileSync('snapshot-transfer.js','utf8'));w.eval(fs.readFileSync('snapshot-job.js','utf8'));w.eval(fs.readFileSync('cloud.js','utf8'));
  const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('test',1);r.onupgradeneeded=()=>['media','notes','contacts','chats','albums','kv'].forEach(n=>r.result.createObjectStore(n,{keyPath:n==='kv'?null:'id'}));r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
  const write=fn=>new Promise((resolve,reject)=>{const t=db.transaction(['notes','media'],'readwrite');fn(t);t.oncomplete=resolve;t.onerror=()=>reject(t.error);});
  await write(t=>{t.objectStore('notes').put({id:'note-1',text:'Original cloud text'});t.objectStore('media').put({id:'photo-1',name:'test.png',blob:new Blob(['media-bytes'],{type:'image/png'})});});
