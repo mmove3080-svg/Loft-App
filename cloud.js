@@ -38,10 +38,11 @@
     }
     return session.access_token;
   }
-  async function request(action, params = {}, body) {
+  async function request(action, params = {}, body, signal) {
     const access = await token();
+    if(signal?.aborted)throw new Error("Sync paused.");
     return result(await fetch(apiURL + '?' + new URLSearchParams({action, ...params}), {
-      method: body === undefined ? 'GET' : 'POST', cache: 'no-store', signal: AbortSignal.timeout(60000),
+      method: body === undefined ? 'GET' : 'POST', cache: 'no-store', signal: signal || AbortSignal.timeout(60000),
       headers: {Authorization: 'Bearer ' + access, ...(body === undefined ? {} : {'Content-Type': 'application/json'})},
       body: body === undefined ? undefined : JSON.stringify(body)
     }));
@@ -104,6 +105,7 @@
   function snapshotProgress(state){snapshotState=state;window.dispatchEvent(new Event('loft-snapshot-status'));}
   function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
   async function save(bridge, progress, createNew=true){
+    if(auto.running)await setAuto(false);
     const db=await bridge.openDB(),engine=window.LoftSnapshotJob;
     if(!db)throw new Error('Persistent local storage is unavailable.');
     if(snapshotRunning)return;
@@ -127,7 +129,8 @@
     else throw new Error('Update your browser to enable safe resumable snapshots.');
   }
   async function resumeSnapshot(){
-    if(!auto.bridge||!session||busy||snapshotRunning||navigator.onLine===false)return;
+    if(!auto.bridge||!session||busy||auto.running||snapshotRunning||navigator.onLine===false)return;
+    const db=await auto.bridge.openDB();if(!db||!await dbRead(db,'snapshot-job-v2')||busy||auto.running||snapshotRunning)return;
     busy=true;try{await save(auto.bridge,null,false);}catch{}finally{busy=false;}
   }
   async function init(bridge){
@@ -143,6 +146,7 @@
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resumeSnapshot();});
   setInterval(()=>resumeSnapshot(),15000);
   async function importSnapshot(bridge, id, progress) {
+    if(auto.running)await setAuto(false);
     const db = await bridge.openDB();
     if (!db) throw new Error('Persistent local storage is unavailable.');
     const prior = await new Promise((resolve, reject) => {const r = db.transaction('kv').objectStore('kv').get('cloud-import:' + id); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error);});
@@ -193,9 +197,29 @@
     bridge.refresh();
     progress('Imported ' + pending.length + ' records. Existing local records were preserved. Reopen Photos, Notes, Contacts or Messages to view them.');
   }
-  const auto={bridge:null,enabled:false,loaded:false,message:'Automatic sync is off.',conflicts:[],choices:{},lastRun:0};
+  const auto={running:false,controller:null,done:null,retryBlocked:false,bridge:null,enabled:false,loaded:false,message:'Automatic sync is off.',conflicts:[],choices:{},lastRun:0};
   function syncStatus(message){auto.message=message;window.dispatchEvent(new Event('loft-sync-status'));}
   function dbRead(db,key){return new Promise((resolve,reject)=>{const r=db.transaction('kv').objectStore('kv').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+  function checkSync(signal){if(signal.aborted||!auto.enabled||!session)throw new Error('Sync paused.');}
+  async function syncRequest(signal,action,params={},body){
+    checkSync(signal);
+    const controller=new AbortController(),cancel=()=>controller.abort();
+    signal.addEventListener('abort',cancel,{once:true});
+    const timeout=setTimeout(cancel,60000);
+    try{
+      const response=await request(action,params,body,controller.signal);
+      // Consume the body before releasing the timeout/cancellation listener.
+      const bytes=await response.arrayBuffer();checkSync(signal);
+      return new Response(bytes,{status:response.status,headers:response.headers});
+    }finally{clearTimeout(timeout);signal.removeEventListener('abort',cancel);}
+  }
+  async function syncCheckpoint(db,key,value){
+    await window.LoftSnapshotJob.transaction(db,s=>value===undefined?s.delete(key):s.put(value,key));
+  }
+  async function stopSync(){
+    auto.controller?.abort();
+    if(auto.done)await auto.done;
+  }
   async function syncRead(){
     const db=await auto.bridge.openDB();if(!db)throw new Error('Local database unavailable. Sync paused.');
     return new Promise((resolve,reject)=>{
@@ -206,10 +230,10 @@
       tx.oncomplete=()=>resolve({db,records,revision,base:state.base});tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not read sync state.'));
     });
   }
-  async function syncMedia(entry,info){
+  async function syncMedia(entry,info,signal){
     if(!info||!Array.isArray(info.parts)||!Number.isSafeInteger(info.size)||info.size<0)throw new Error('Invalid synced media.');
     const chunks=[];
-    for(const p of info.parts){const b=await (await request('sync-part',{id:entry.source,part:String(p.number)})).blob();if(await hash(b)!==p.hash)throw new Error('Sync media integrity check failed.');chunks.push(b);}
+    for(const p of info.parts){const b=await (await (signal?syncRequest(signal,'sync-part',{id:entry.source,part:String(p.number)}):request('sync-part',{id:entry.source,part:String(p.number)}))).blob();if(await hash(b)!==p.hash)throw new Error('Sync media integrity check failed.');chunks.push(b);}
     const b=new Blob(chunks,{type:info.type});if(b.size!==info.size)throw new Error('Incomplete synced media.');return b;
   }
   async function reuseEncoding(value,entry){
@@ -220,80 +244,106 @@
       return info;
     });return valid&&n===refs.length?encoded:null;
   }
-  async function syncCycle(){
+  async function syncCycle(signal){
+    checkSync(signal);syncStatus("Reading this device’s library…");
     const engine=window.LoftSyncEngine;if(!engine)throw new Error('Reload the app to finish the update.');
     const local=await syncRead();let entries;
     if(auto.cacheRevision===local.revision&&auto.cacheDB===local.db)entries=auto.cacheEntries;
-    else{entries=[];for(const r of local.records)entries.push({store:r.store,id:r.value.id,value:r.value,deleted:false,hash:await hash(new Blob([await fingerprint(r.value)]))});auto.cacheRevision=local.revision;auto.cacheDB=local.db;auto.cacheEntries=entries;}
-    const remote=await (await request('sync-index')).json();
+    else{entries=[];for(const r of local.records){checkSync(signal);syncStatus('Checking '+(entries.length+1)+'/'+local.records.length+' · '+(r.value.name||r.store));await new Promise(resolve=>setTimeout(resolve,0));entries.push({store:r.store,id:r.value.id,value:r.value,deleted:false,hash:await hash(new Blob([await fingerprint(r.value)]))});}auto.cacheRevision=local.revision;auto.cacheDB=local.db;auto.cacheEntries=entries;}
+    checkSync(signal);syncStatus('Reading shared collection…');
+    const remote=await window.LoftSnapshotTransfer.readSync((...args)=>syncRequest(signal,...args));
     const plan=engine.plan(entries,remote.entries,local.base,auto.choices);
     auto.conflicts=plan.conflicts;
     if(plan.conflicts.length){
       for(const c of plan.conflicts)if(c.remote&&!c.remote.deleted)c.cloudValue=await decode(c.remote.value,async info=>({size:info.size,type:info.type}));
       syncStatus('Sync paused: '+plan.conflicts.length+' conflicting item(s). Choose which version to keep below.');return;}
     const updates=[];
+    let received=0,sent=0;
     for(const e of plan.pull){
+      checkSync(signal);syncStatus('Receiving '+(++received)+'/'+plan.pull.length+' · '+e.store);
       if(e.deleted){updates.push(e);continue;}
       const localEntry=entries.find(x=>x.store===e.store&&x.id===e.id);let value;
       const reuse=localEntry&&await reuseEncoding(localEntry.value,e);
       if(reuse){const blobs=[];await encode(localEntry.value,async b=>{blobs.push(b);return null;});let n=0;value=await decode(e.value,async()=>blobs[n++]);}
-      else value=await decode(e.value,info=>syncMedia(e,info));
+      else value=await decode(e.value,info=>syncMedia(e,info,signal));
       if(!value||value.id!==e.id||await hash(new Blob([await fingerprint(value)]))!==e.hash)throw new Error('Synced record integrity check failed.');
       updates.push({...e,value});
     }
     if(plan.push.length){
       const next=new Map(remote.entries.map(e=>[engine.keyOf(e),e]));
       for(const e of plan.push){
+        checkSync(signal);syncStatus("Sending "+(++sent)+"/"+plan.push.length+" · "+(e.value?.name||e.store));
         if(e.deleted){next.set(engine.keyOf(e),{store:e.store,id:e.id,deleted:true});continue;}
         const previous=next.get(engine.keyOf(e)),reuse=await reuseEncoding(e.value,previous);
         if(reuse){next.set(engine.keyOf(e),{store:e.store,id:e.id,hash:e.hash,deleted:false,source:previous.source,value:reuse});continue;}
-        const source=uuid();let number=0;
+        const checkpointKey='sync-upload-v2:'+engine.keyOf(e);
+        let checkpoint=await dbRead(local.db,checkpointKey);
+        if(!checkpoint||checkpoint.hash!==e.hash||remote.garbage?.includes(checkpoint.source)){checkpoint={hash:e.hash,source:uuid(),parts:[]};await syncCheckpoint(local.db,checkpointKey,checkpoint);}
+        const source=checkpoint.source;let number=0;
         const value=await encode(e.value,async blob=>{
           const parts=[];
-          for(let offset=0;offset<blob.size;offset+=1048576){const slice=blob.slice(offset,offset+1048576),part=number++;await request('sync-part',{id:source,part:String(part)},{data:base64(new Uint8Array(await slice.arrayBuffer()))});parts.push({number:part,hash:await hash(slice)});}
+          for(let offset=0;offset<blob.size;offset+=1048576){
+            checkSync(signal);const slice=blob.slice(offset,offset+1048576),part=number++,digest=await hash(slice);
+            syncStatus('Sending '+sent+'/'+plan.push.length+' · '+(e.value.name||e.store)+' · '+Math.min(offset+slice.size,blob.size)+'/'+blob.size+' bytes');
+            let saved=false;
+            if(checkpoint.parts[part]===digest){const state=await(await syncRequest(signal,'sync-part-status',{id:source,part:String(part)})).json();saved=state.exists&&state.hash===digest&&state.size===slice.size;}
+            if(!saved){
+              await syncRequest(signal,'sync-part',{id:source,part:String(part)},{data:base64(new Uint8Array(await slice.arrayBuffer()))});
+              checkpoint.parts[part]=digest;await syncCheckpoint(local.db,checkpointKey,checkpoint);
+            }
+            parts.push({number:part,hash:digest});
+          }
           return {size:blob.size,type:blob.type,parts};
         });
         next.set(engine.keyOf(e),{store:e.store,id:e.id,hash:e.hash,deleted:false,source,value});
       }
-      await request('sync-index',{}, {revision:remote.revision,entries:[...next.values()]});
+      checkSync(signal);syncStatus('Saving shared collection…');
+      await window.LoftSnapshotTransfer.commitSync({revision:remote.revision,entries:[...next.values()]},{request:(...args)=>syncRequest(signal,...args),hash});
     }
+    checkSync(signal);syncStatus('Saving changes on this device…');
     if(!auto.bridge.canSync()||!auto.enabled||!session)throw new Error('Sync will finish when you return to Home or Settings.');
     await new Promise((resolve,reject)=>{
       const tx=local.db.transaction([...stores,'kv'],'readwrite'),kv=tx.objectStore('kv'),r=kv.get('sync-local-revision');
       r.onsuccess=()=>{
-        if((r.result||0)!==local.revision||!auto.bridge.canSync()||!auto.enabled||!session){tx.abort();return;}
+        if(signal.aborted||(r.result||0)!==local.revision||!auto.bridge.canSync()||!auto.enabled||!session){tx.abort();return;}
         for(const e of updates){const store=tx.objectStore(e.store);if(e.deleted)store.delete(e.id);else store.put(e.value);}
+        for(const e of entries)kv.delete('sync-upload-v2:'+engine.keyOf(e));
         kv.put(plan.base,'sync-base-v1');kv.put(local.revision+(updates.length?1:0),'sync-local-revision');kv.put(Date.now(),'sync-last-success');
       };
       tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Local data changed during sync. It will retry.'));
     });
-    auto.choices={};auto.bridge.refresh();
-    let cleanupWarning='';try{const cleaned=await (await request('sync-cleanup',{},{})).json();if(!cleaned.done)cleanupWarning=' Removed media cleanup continues on the next sync.';}catch{cleanupWarning=' Removed media cleanup is pending; use Clean removed sync media.';}
-    syncStatus('Up to date · '+new Date().toLocaleTimeString()+'. '+plan.push.length+' sent, '+plan.pull.length+' received.'+cleanupWarning);
+    checkSync(signal);auto.choices={};auto.bridge.refresh();
+    let cleanupWarning='';try{const cleaned=await (await syncRequest(signal,'sync-cleanup',{},{})).json();if(!cleaned.done)cleanupWarning=' Removed media cleanup continues on the next sync.';}catch{cleanupWarning=' Removed media cleanup is pending; use Clean removed sync media.';}
+    checkSync(signal);syncStatus('Up to date · '+new Date().toLocaleTimeString()+'. '+plan.push.length+' sent, '+plan.pull.length+' received.'+cleanupWarning);
   }
   async function tick(force=false){
-    if(!auto.loaded||!auto.enabled||!session||busy||!auto.bridge)return;
+    if(!auto.loaded||!auto.enabled||!session||busy||auto.running||snapshotRunning||(!force&&auto.retryBlocked)||!auto.bridge)return;
     if(navigator.onLine===false){syncStatus('Offline. Changes stay on this device until you reconnect.');return;}
     if(!auto.bridge.canSync()){syncStatus('Changes will sync when you return to Home or Settings.');return;}
     if(document.visibilityState==='hidden'&&!force)return;
     if(!navigator.locks){syncStatus('This browser does not support safe automatic sync. Manual backups remain available.');return;}
     if(!force&&Date.now()-auto.lastRun<15000)return;
     await navigator.locks.request('loft-auto-sync-v1',{ifAvailable:true},async lock=>{
-      if(!lock||busy)return;
+      if(!lock||busy||auto.running)return;
       const db=await auto.bridge.openDB();if(!db||!await dbRead(db,'sync-enabled-v1')){auto.enabled=false;syncStatus('Automatic sync is off.');return;}
-      busy=true;auto.lastRun=Date.now();
-      try{syncStatus('Syncing…');await syncCycle();}
-      catch(e){syncStatus('Sync paused: '+(e.message||'Connection failed. It will retry.'));}
-      finally{busy=false;window.dispatchEvent(new Event('loft-sync-status'));}
+      if(!auto.enabled||!session||busy||auto.running)return;
+      auto.running=true;auto.retryBlocked=false;auto.lastRun=Date.now();
+      const controller=new AbortController();auto.controller=controller;
+      let finish;auto.done=new Promise(resolve=>{finish=resolve;});
+      try{await syncCycle(controller.signal);}
+      catch(e){if(!controller.signal.aborted){auto.retryBlocked=true;syncStatus('Sync paused: '+(e.message||'Connection failed.')+' Tap Sync now to retry.');}}
+      finally{auto.running=false;auto.controller=null;auto.done=null;finish();window.dispatchEvent(new Event('loft-sync-status'));}
     });
   }
   setInterval(()=>{tick().catch(()=>{});},15000);
   window.addEventListener('online',()=>{tick(true).catch(()=>{});});
   document.addEventListener('visibilitychange',()=>{tick().catch(()=>{});});
   async function setAuto(enabled){
+    if(!enabled){auto.enabled=false;auto.controller?.abort();syncStatus('Pausing sync…');}
     const db=await auto.bridge.openDB();if(!db)throw new Error('Local storage unavailable.');
     await new Promise((resolve,reject)=>{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(enabled,'sync-enabled-v1');const rev=tx.objectStore('kv').get('sync-local-revision');rev.onsuccess=()=>tx.objectStore('kv').put((rev.result||0)+1,'sync-local-revision');tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
-    auto.enabled=enabled;syncStatus(enabled?'Automatic sync enabled. Preparing first sync…':'Automatic sync is off.');
+    if(!enabled)await stopSync();
+    auto.enabled=enabled;auto.retryBlocked=false;syncStatus(enabled?'Automatic sync enabled. Preparing first sync…':'Automatic sync is off.');
     setTimeout(()=>{tick(true).catch(()=>{});},0);
   }
   function mount(root, bridge) {
@@ -381,7 +431,7 @@
       currentBrowsing=item;
       const viewId=++libraryView;
       clearPreviews();snapshots.textContent='';progress('Loading library…');
-      const data=item.sync?await(await request('sync-index')).json():await window.LoftSnapshotTransfer.read(item.id,request);
+      const data=item.sync?await window.LoftSnapshotTransfer.readSync(request):await window.LoftSnapshotTransfer.read(item.id,request);
       const active=item.sync?(item.trash?data.trash||[]:data.entries.filter(e=>!e.deleted)):null;
       const manifest=item.sync?{records:active.map(e=>({store:e.store,value:e.value})),createdAt:Date.now()}:data.manifest,revision=data.revision;
       snapshots.append(node('h3',item.trash?'Trash · 30-day recovery':item.sync?'Your cloud collection':'Saved backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
@@ -463,7 +513,7 @@
           }else if(store!=='albums')button(item.sync?'Move to Trash':'Delete item from this backup',async()=>{
             if(item.sync){
               if(!confirm('Move this item to Trash? Enabled devices receive the deletion on their next sync. You can restore it for 30 days.'))return;
-              const entry=active[index];await request('sync-index',{}, {revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?{store:e.store,id:e.id,deleted:true}:e)});
+              const entry=active[index];await window.LoftSnapshotTransfer.commitSync({revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?{store:e.store,id:e.id,deleted:true}:e)},{request,hash});
               await browse(item);progress('Moved to Trash for 30 days.');setTimeout(()=>tick(true).catch(()=>{}),0);return;
             }
             if(!confirm('Permanently delete this item from THIS backup? Other backups and device copies remain.'))return;
@@ -510,8 +560,9 @@
     async function reload(){currentBrowsing=null;libraryView++;clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
     list.onclick=()=>run(reload);
     logout.onclick = () => run(async () => {
+      await setAuto(false);
       const old = session; session = null; const db=await bridge.openDB();await window.LoftSnapshotJob.transaction(db,s=>s.delete('snapshot-session-v2')); libraryView++; clearPreviews(); snapshots.textContent = '';
-      if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
+      if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {signal:AbortSignal.timeout(10000),method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
       syncStatus('Sign in to resume cloud sync.');
       progress('Signed out on this page. Local records are still available behind your local privacy lock.');
     });
@@ -528,7 +579,7 @@
       if(!auto.enabled&&!confirm('Enable automatic sync on this device? Current photos, videos, notes, contacts and conversations will merge with your shared collection. Future edits and deletions sync between enabled devices. Conflicting edits pause for your choice. Dated backups stay separate.'))return;
       await setAuto(!auto.enabled);
     },syncPanel);
-    button('Sync now',async()=>{setTimeout(()=>{tick(true).catch(()=>{});},0);},syncPanel);
+    button('Sync now',async()=>{if(auto.running)return;setTimeout(()=>{tick(true).catch(()=>{});},0);},syncPanel);
     button('Browse synced collection',()=>browse({sync:true}),syncPanel);
     button('Clean removed sync media',async()=>{let done=false;while(!done){progress('Removing unused sync media… Keep this page open.');done=(await (await request('sync-cleanup',{},{})).json()).done;}progress('Removed sync media cleanup is complete. Older backups remain unchanged.');},syncPanel);
     syncPanel.append(conflictList);actions.prepend(syncPanel);

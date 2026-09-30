@@ -7,9 +7,10 @@ function fixture(){
  const s3={send:async c=>{
   const x=c.input,o=objects.get(x.Key);
   if(c.constructor.name==='PutObjectCommand'){
-   if(x.IfNoneMatch==='*'&&o)throw {$metadata:{httpStatusCode:412}};
-   const bytes=Buffer.from(x.Body);objects.set(x.Key,{bytes,etag:'"'+crypto.createHash('sha256').update(bytes).digest('hex')+'"'});writes.push(x.Key);return {};
+   if((x.IfMatch&&x.IfMatch!==o?.etag)||(x.IfNoneMatch==='*'&&o))throw {$metadata:{httpStatusCode:412}};
+   const bytes=Buffer.from(x.Body);objects.set(x.Key,{bytes,etag:'"'+crypto.createHash('sha256').update(bytes).digest('hex')+'"'});writes.push(x.Key);return {ETag:objects.get(x.Key).etag};
   }
+  if(c.constructor.name==='DeleteObjectsCommand'){for(const item of x.Delete.Objects)objects.delete(item.Key);return {};}
   if(!o)throw {$metadata:{httpStatusCode:404}};
   if(x.IfMatch&&x.IfMatch!==o.etag)throw {$metadata:{httpStatusCode:412}};
   if(c.constructor.name==='HeadObjectCommand')return {ContentLength:o.bytes.length,ETag:o.etag};
@@ -45,4 +46,25 @@ test('corrupt, incomplete, invalid, and conflicting indexes cannot publish; read
 test('legacy v1 committed snapshots can be read through paged transport',async()=>{
  const f=fixture(),m={version:1,parts:0,records:[]};f.objects.set(f.prefix+'commits/'+f.id+'.json',{bytes:Buffer.from(JSON.stringify(m)),etag:'"legacy"'});
  assert.deepEqual(await client.read(f.id,f.request),{manifest:m,revision:'"legacy"'});
+});
+
+test('large live sync transport preserves conditional writes, Trash, and bounded requests',async()=>{
+ const f=fixture();
+ const request=async(action,query={},body)=>{
+  if(body)assert.ok(Buffer.byteLength(JSON.stringify(body))<1500000);
+  const response=action==='sync-index'?await require('../lib/sync').syncIndex({s3:f.s3,Bucket:'b',prefix:f.prefix,method:body?'POST':'GET',body}):await transfer({s3:f.s3,Bucket:'b',prefix:f.prefix,sync:true,action:action.slice(5),method:body?'POST':'GET',query,body});
+  assert.ok(Buffer.byteLength(JSON.stringify(response))<1500000);
+  return {json:async()=>response};
+ };
+ assert.deepEqual(await client.readSync(request),{entries:[],trash:[],revision:null});
+ const entries=Array.from({length:5127},(_,i)=>({store:'notes',id:'n'+i,deleted:false,hash:'a'.repeat(64),source:f.id,value:['object',[['id',['value','n'+i]],['text',['value','😀'+'x'.repeat(1000)]]]]}));
+ await client.commitSync({revision:null,entries},{request,hash});
+ const first=await client.readSync(request);assert.deepEqual(first.entries,entries);
+ assert(![...f.objects.keys()].some(k=>k.includes('/sync/metadata/')),'successful transport staging is cleaned');
+ const deleted=entries.map((e,i)=>i?e:{store:e.store,id:e.id,deleted:true});
+ await client.commitSync({revision:first.revision,entries:deleted},{request,hash});
+ const next=await client.readSync(request);assert.equal(next.entries[0].deleted,true);assert.equal(next.trash.length,1);
+ await assert.rejects(client.commitSync({revision:first.revision,entries},{request,hash}),/Cloud data changed/);
+ assert.equal((await client.readSync(request)).entries[0].deleted,true);
+ await assert.rejects(client.readSync(async(a,q,b)=>{if(a==='sync-index-page')q.revision='stale';return request(a,q,b);}));
 });
