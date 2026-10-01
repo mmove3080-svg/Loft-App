@@ -33,7 +33,7 @@
   async function token() {
     if (!session) throw new Error('Please sign in.');
     if (session.expires_at < Date.now() + 60000) {
-      if (!refreshing) refreshing = auth('refresh_token', {refresh_token: session.refresh_token}).then(async s => {session = s;await rememberSnapshotSession();}).finally(() => {refreshing = null;});
+      if (!refreshing) {const previous=session;refreshing = auth('refresh_token', {refresh_token: previous.refresh_token}).then(async s => {if(session!==previous)throw new Error('Cloud session changed. Please sign in again.');session = s;await rememberSnapshotSession();}).finally(() => {refreshing = null;});}
       await refreshing;
     }
     return session.access_token;
@@ -97,14 +97,44 @@
       tx.onerror = tx.onabort = () => reject(tx.error || new Error('Could not read local data.'));
     });
   }
-  let snapshotState=null, snapshotRunning=false;
+  let snapshotState=null, snapshotRunning=false, snapshotController=null, snapshotDone=null, snapshotPaused=false, snapshotEpoch=0, snapshotRetryBlocked=false;
+  async function snapshotPreference(db){
+    if(!await dbRead(db,'snapshot-controls-v1')){
+      const pending=await dbRead(db,'snapshot-job-v2');
+      await window.LoftSnapshotJob.transaction(db,s=>{s.put(true,'snapshot-controls-v1');if(pending)s.put(true,'snapshot-paused-v1');});
+    }
+    snapshotPaused=!!await dbRead(db,'snapshot-paused-v1');
+    if(snapshotPaused&&snapshotState&&snapshotState.state!=='complete')snapshotProgress({...snapshotState,state:'paused',error:'Progress preserved. Tap Resume snapshot when ready.'});
+  }
+  async function pauseSnapshot(bridge){
+    snapshotEpoch++;snapshotPaused=true;snapshotController?.abort();
+    const db=await bridge.openDB();
+    await window.LoftSnapshotJob.transaction(db,s=>s.put(true,'snapshot-paused-v1'));
+    await snapshotDone?.catch(()=>{});
+    const job=await dbRead(db,'snapshot-job-v2');
+    if(job)snapshotProgress({...job,state:'paused',error:'Progress preserved. Tap Resume snapshot when ready.'});
+  }
+  function checkSnapshot(signal){if(signal.aborted||snapshotPaused||!session)throw new Error('Snapshot paused. Progress preserved.');}
+  async function snapshotRequest(signal,action,params={},body){
+    checkSnapshot(signal);
+    const controller=new AbortController(),cancel=()=>controller.abort();
+    signal.addEventListener('abort',cancel,{once:true});
+    let rejectAbort;
+    const aborted=new Promise((_,reject)=>{rejectAbort=()=>reject(new Error(signal.aborted?'Snapshot paused. Progress preserved.':'Snapshot request timed out. Progress preserved.'));controller.signal.addEventListener('abort',rejectAbort,{once:true});});
+    const timer=setTimeout(cancel,60000);
+    try{return await Promise.race([aborted,(async()=>{
+      const response=await request(action,params,body,controller.signal);
+      const bytes=await response.arrayBuffer();checkSnapshot(signal);
+      return new Response(bytes,{status:response.status,headers:response.headers});
+    })()]);}finally{clearTimeout(timer);signal.removeEventListener('abort',cancel);controller.signal.removeEventListener('abort',rejectAbort);}
+  }
   async function rememberSnapshotSession(){
     if(!auto.bridge||!session)return;const db=await auto.bridge.openDB();
     if(db&&await dbRead(db,'snapshot-job-v2'))await window.LoftSnapshotJob.transaction(db,s=>s.put(session,'snapshot-session-v2'));
   }
   function snapshotProgress(state){snapshotState=state;window.dispatchEvent(new Event('loft-snapshot-status'));}
-  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':s.state==='preparing'?'Checking existing backups':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB checked · Uploaded this snapshot: '+((s.transferred||0)/1048576).toFixed(1)+' MB · Reused: '+((s.reused||0)/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
-  async function snapshotCatalog(progress){
+  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':s.state==='preparing'?'Checking existing backups':'Checking and saving snapshot')+' · '+s.index+'/'+s.total+' records checked · '+(s.uploaded/1048576).toFixed(1)+' MB checked · Uploaded this snapshot: '+((s.transferred||0)/1048576).toFixed(1)+' MB · Reused: '+((s.reused||0)/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
+  async function snapshotCatalog(progress, request){
     const catalog=new Map();let cursor;
     const visit=(value,id)=>{
       if(!Array.isArray(value))throw new Error('Invalid backup metadata.');
@@ -126,34 +156,54 @@
     return catalog;
   }
   async function snapshotPart(id,p){return request(p.shared?'shared-get':'part',p.shared?{hash:p.hash}:{id,part:String(p.number)});}
-  async function save(bridge, progress, createNew=true){
+  function save(bridge,progress,createNew=true){
+    if(snapshotDone)return snapshotDone;
+    snapshotDone=saveWork(bridge,progress,createNew).finally(()=>{snapshotDone=null;window.dispatchEvent(new Event('loft-snapshot-status'));});
+    return snapshotDone;
+  }
+  async function saveWork(bridge, progress, createNew=true){
+    const epoch=snapshotEpoch;
     if(auto.running)await setAuto(false);
     const db=await bridge.openDB(),engine=window.LoftSnapshotJob;
     if(!db)throw new Error('Persistent local storage is unavailable.');
     if(snapshotRunning)return;
+    await snapshotPreference(db);
+    if(epoch!==snapshotEpoch)return;
+    if(createNew){snapshotRetryBlocked=false;await engine.transaction(db,s=>s.put(false,'snapshot-paused-v1'));snapshotPaused=false;}
+    else if(snapshotPaused||snapshotRetryBlocked)return;
+    if(epoch!==snapshotEpoch)return;
     const work=async lock=>{
-      if(!lock||snapshotRunning)return;snapshotRunning=true;
+      if(!lock||snapshotRunning||epoch!==snapshotEpoch)return;snapshotRunning=true;
+      const controller=new AbortController();snapshotController=controller;
+      const request=(...args)=>snapshotRequest(controller.signal,...args);
       try{
         let job=await engine.read(db,engine.KEY);
         if(!job&&createNew){job=await engine.create(db,await readLocal(bridge),uuid());if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});}
         if(!job)return;
         await rememberSnapshotSession();
         snapshotProgress({...job,state:'preparing'});
-        const catalog=job.index<job.total?await snapshotCatalog(progress):new Map();
+        const catalog=job.index<job.total?await snapshotCatalog(progress,request):new Map();
         await engine.run(db,{
-          encode,hash,online:()=>navigator.onLine!==false,
+          encode,hash,check:()=>checkSnapshot(controller.signal),online:()=>navigator.onLine!==false,
           progress:s=>{snapshotProgress(s);if(progress)progress(snapshotMessage(s));},
           exists:async(id,p)=>{const r=await(await request(p.shared?'shared-status':'part-status',p.shared?{hash:p.hash}:{id,part:String(p.number)})).json();if(r.exists&&(r.hash!==p.hash||r.size!==p.size))throw new Error('Saved upload part does not match.');return r.exists;},
           reuse:async p=>{
             const state=await(await request('shared-status',{hash:p.hash})).json();
             if(state.exists){if(state.size!==p.size)throw new Error('Saved media size does not match.');return true;}
             const old=catalog.get(p.hash);if(!old||old.size!==p.size)return false;
-            return (await(await request('shared-promote',{}, {hash:p.hash,...old})).json()).saved;
+            const promoted=(await(await request('shared-promote',{}, {hash:p.hash,...old})).json()).saved;
+            if(!promoted)throw new Error('Existing backup media could not be verified. Paused to avoid uploading it again.');
+            return true;
           },
           upload:async(id,p,blob)=>request(p.shared?'shared-put':'part',p.shared?{}:{id,part:String(p.number)},{...(p.shared?{hash:p.hash}:{}),data:base64(new Uint8Array(await blob.arrayBuffer()))}),
           commit:(id,manifest)=>window.LoftSnapshotTransfer.commit(id,manifest,{request,hash})
         });
-      }finally{snapshotRunning=false;window.dispatchEvent(new Event('loft-snapshot-status'));}
+      }catch(e){
+        snapshotRetryBlocked=true;
+        const pending=await engine.read(db,engine.KEY);
+        if(pending)snapshotProgress({...pending,state:'paused',error:e.message});
+        throw e;
+      }finally{snapshotController=null;snapshotRunning=false;window.dispatchEvent(new Event('loft-snapshot-status'));}
     };
     if(navigator.locks)await navigator.locks.request('loft-snapshot-upload-v2',{ifAvailable:true},work);
     else throw new Error('Update your browser to enable safe resumable snapshots.');
@@ -161,7 +211,7 @@
   async function resumeSnapshot(){
     if(!auto.bridge||!session||busy||auto.running||snapshotRunning||navigator.onLine===false)return;
     const db=await auto.bridge.openDB();if(!db||!await dbRead(db,'snapshot-job-v2')||busy||auto.running||snapshotRunning)return;
-    busy=true;try{await save(auto.bridge,null,false);}catch{}finally{busy=false;}
+    try{await save(auto.bridge,null,false);}catch{}
   }
   async function init(bridge){
     auto.bridge=bridge;
@@ -171,7 +221,7 @@
       window.dispatchEvent(new Event('loft-snapshot-status'));
     }catch(e){syncStatus(e.message);}
   }
-  window.addEventListener('online',()=>resumeSnapshot());
+  window.addEventListener('online',()=>{snapshotRetryBlocked=false;resumeSnapshot();});
   window.addEventListener('pageshow',()=>resumeSnapshot());
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resumeSnapshot();});
   setInterval(()=>resumeSnapshot(),15000);
@@ -347,16 +397,16 @@
     checkSync(signal);syncStatus('Up to date · '+new Date().toLocaleTimeString()+'. '+plan.push.length+' sent, '+plan.pull.length+' received.'+cleanupWarning);
   }
   async function tick(force=false){
-    if(!auto.loaded||!auto.enabled||!session||busy||auto.running||snapshotRunning||(!force&&auto.retryBlocked)||!auto.bridge)return;
+    if(!auto.loaded||!auto.enabled||!session||busy||auto.running||snapshotDone||snapshotRunning||(!force&&auto.retryBlocked)||!auto.bridge)return;
     if(navigator.onLine===false){syncStatus('Offline. Changes stay on this device until you reconnect.');return;}
     if(!auto.bridge.canSync()){syncStatus('Changes will sync when you return to Home or Settings.');return;}
     if(document.visibilityState==='hidden'&&!force)return;
     if(!navigator.locks){syncStatus('This browser does not support safe automatic sync. Manual backups remain available.');return;}
     if(!force&&Date.now()-auto.lastRun<15000)return;
     await navigator.locks.request('loft-auto-sync-v1',{ifAvailable:true},async lock=>{
-      if(!lock||busy||auto.running)return;
+      if(!lock||busy||auto.running||snapshotDone)return;
       const db=await auto.bridge.openDB();if(!db||!await dbRead(db,'sync-enabled-v1')){auto.enabled=false;syncStatus('Automatic sync is off.');return;}
-      if(!auto.enabled||!session||busy||auto.running)return;
+      if(!auto.enabled||!session||busy||auto.running||snapshotDone)return;
       auto.running=true;auto.retryBlocked=false;auto.lastRun=Date.now();
       const controller=new AbortController();auto.controller=controller;
       let finish;auto.done=new Promise(resolve=>{finish=resolve;});
@@ -380,7 +430,7 @@
     auto.bridge=bridge;
     const section = node('section'); section.className = 'cloud-panel';
     section.style.cssText = 'margin:16px;padding:18px;border:1px solid #8886;border-radius:16px;line-height:1.5;color:var(--ink,#111);background:var(--card,#fff)';
-    section.append(node('h2', bridge.library?'Cloud Library':'Cloud Storage'), node('p', 'Automatic sync shares your current data between enabled devices. Dated snapshots remain separate backups. Your local privacy lock stays separate.'));
+    section.append(node('h2', bridge.library?'Cloud Library':'Cloud Storage'),node('small','Snapshot controls v16'), node('p', 'Automatic sync shares your current data between enabled devices. Dated snapshots remain separate backups. Your local privacy lock stays separate.'));
     const status = node('p', session ? 'Signed in for this page session.' : 'Sign in with your app email and password.'); status.setAttribute('role', 'status'); status.style.overflowWrap = 'anywhere';
     const form = node('form'), email = node('input'), password = node('input'), signin = node('button', 'Sign in');
     email.type = 'email'; email.placeholder = 'Email address'; email.autocomplete = 'username'; email.required = true; email.setAttribute('aria-label', 'Email address');
@@ -396,7 +446,7 @@
       if (busy) return;
       busy = true; section.querySelectorAll('button').forEach(b => {b.disabled = true;});
       try {await fn();} catch(e) {progress(e.message || 'Operation failed. Try again.');}
-      finally {busy = false; section.querySelectorAll('button').forEach(b => {b.disabled = false;}); display();}
+      finally {busy = false; section.querySelectorAll('button').forEach(b => {b.disabled = false;}); renderSnapshot();display();}
     }
     form.onsubmit = e => {e.preventDefault(); run(async () => {
       progress('Signing in…');
@@ -407,11 +457,13 @@
       if(bridge.library)await browse({sync:true});
       await rememberSnapshotSession();setTimeout(async()=>{await resumeSnapshot();tick(true).catch(()=>{});},0);
     });};
-    upload.onclick = () => run(() => save(bridge, progress));
+    upload.onclick = () => {if(busy||snapshotDone)return;save(bridge,progress).catch(e=>progress(e.message));};
+    const pauseSnapshotButton=node('button','Pause snapshot');actions.insertBefore(pauseSnapshotButton,list);
+    pauseSnapshotButton.onclick=()=>pauseSnapshot(bridge).catch(e=>progress(e.message));
     const snapshotPanel=node('section'),snapshotText=node('p'),snapshotMeter=node('progress');snapshotText.setAttribute('role','status');snapshotMeter.style.width='100%';snapshotPanel.append(snapshotText,snapshotMeter);section.insertBefore(snapshotPanel,snapshots);
-    const renderSnapshot=()=>{if(!section.isConnected){window.removeEventListener('loft-snapshot-status',renderSnapshot);return;}snapshotPanel.hidden=!snapshotState;if(snapshotState){snapshotText.textContent=snapshotMessage(snapshotState);snapshotMeter.max=snapshotState.total||1;snapshotMeter.value=snapshotState.index;upload.textContent=snapshotState.state==='complete'?'Save snapshot':'Resume snapshot';}upload.disabled=snapshotRunning;display();};
+    const renderSnapshot=()=>{if(!section.isConnected){window.removeEventListener('loft-snapshot-status',renderSnapshot);return;}snapshotPanel.hidden=!snapshotState;if(snapshotState){snapshotText.textContent=snapshotMessage(snapshotState);snapshotMeter.max=snapshotState.total||1;snapshotMeter.value=snapshotState.index;upload.textContent=snapshotState.state==='complete'?'Save snapshot':'Resume snapshot';}upload.disabled=busy||!!snapshotDone;pauseSnapshotButton.hidden=!snapshotDone;pauseSnapshotButton.disabled=snapshotPaused;display();};
     window.addEventListener('loft-snapshot-status',renderSnapshot);renderSnapshot();
-    bridge.openDB().then(async db=>{snapshotState=await dbRead(db,'snapshot-job-v2')||await dbRead(db,'snapshot-last-v2');renderSnapshot();});
+    bridge.openDB().then(async db=>{snapshotState=await dbRead(db,'snapshot-job-v2')||await dbRead(db,'snapshot-last-v2');await snapshotPreference(db);renderSnapshot();});
     let cursor;
     const objectURLs = new Set();let previewObserver=null,previewQueue=[],previewActive=0,cloudViewerClose=null;
     function clearPreviews(){if(previewObserver)previewObserver.disconnect();previewObserver=null;previewQueue=[];if(cloudViewerClose)cloudViewerClose();cloudViewerClose=null;for(const dialog of document.querySelectorAll('dialog[data-loft-preview]')){if(dialog.close)dialog.close();else dialog.remove();}for(const url of objectURLs)URL.revokeObjectURL(url);objectURLs.clear();}
@@ -590,6 +642,7 @@
     async function reload(){currentBrowsing=null;libraryView++;clearPreviews();snapshots.textContent='';cursor=null;await loadPage();}
     list.onclick=()=>run(reload);
     logout.onclick = () => run(async () => {
+      await pauseSnapshot(bridge);
       await setAuto(false);
       const old = session; session = null; const db=await bridge.openDB();await window.LoftSnapshotJob.transaction(db,s=>s.delete('snapshot-session-v2')); libraryView++; clearPreviews(); snapshots.textContent = '';
       if (old) {const c = await getConfig(); await fetch(c.url + '/auth/v1/logout?scope=local', {signal:AbortSignal.timeout(10000),method:'POST', headers:{apikey:c.publishableKey,Authorization:'Bearer '+old.access_token}}).catch(() => {});}
@@ -609,7 +662,7 @@
       if(!auto.enabled&&!confirm('Enable automatic sync on this device? Current photos, videos, notes, contacts and conversations will merge with your shared collection. Future edits and deletions sync between enabled devices. Conflicting edits pause for your choice. Dated backups stay separate.'))return;
       await setAuto(!auto.enabled);
     },syncPanel);
-    button('Sync now',async()=>{if(auto.running)return;setTimeout(()=>{tick(true).catch(()=>{});},0);},syncPanel);
+    button('Sync now',async()=>{if(snapshotDone){syncStatus('Pause snapshot before starting sync.');return;}if(auto.running)return;setTimeout(()=>{tick(true).catch(()=>{});},0);},syncPanel);
     button('Browse synced collection',()=>browse({sync:true}),syncPanel);
     button('Clean removed sync media',async()=>{let done=false;while(!done){progress('Removing unused sync media… Keep this page open.');done=(await (await request('sync-cleanup',{},{})).json()).done;}progress('Removed sync media cleanup is complete. Older backups remain unchanged.');},syncPanel);
     syncPanel.append(conflictList);actions.prepend(syncPanel);

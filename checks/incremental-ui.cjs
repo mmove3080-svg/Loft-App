@@ -9,7 +9,7 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
  await new Promise(resolve=>{const t=db.transaction('media','readwrite');t.objectStore('media').put({id:'old',name:'old.jpeg',blob:new Blob([oldBytes],{type:'image/jpeg'})});t.objectStore('media').put({id:'new',name:'new.jpeg',blob:new Blob(['new original'],{type:'image/jpeg'})});t.oncomplete=resolve;});
  const dom=new JSDOM('<main></main>',{url:'https://loft.test',runScripts:'outside-only'}),w=dom.window;
  try{
- w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.setInterval=()=>0;Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({})}});let uploads=0;
+ w.Response=Response;w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.setInterval=()=>0;Object.defineProperty(w.navigator,'locks',{value:{request:async(n,o,fn)=>fn({})}});let uploads=0;
  w.fetch=async(url,o={})=>{const u=new URL(url,'https://loft.test'),action=u.searchParams.get('action'),id=u.searchParams.get('id'),query=Object.fromEntries(u.searchParams),body=o.body?JSON.parse(o.body):undefined,json=value=>new Response(JSON.stringify(value));
   if(action==='config')return json({url:'https://auth.test',publishableKey:'public'});
   if(u.pathname==='/auth/v1/token')return json({access_token:'a',refresh_token:'r',expires_in:3600});

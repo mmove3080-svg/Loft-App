@@ -1,5 +1,5 @@
 /* Only public app assets enter this cache. IndexedDB is never cleared here. */
-const VERSION = 'loft-public-v15';
+const VERSION = 'loft-public-v16';
 const SHELL = [
   './',
   './cloud.js',
