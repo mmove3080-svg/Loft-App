@@ -15,6 +15,9 @@ const {webcrypto}=require('node:crypto');
   assert.equal(opts.headers.Authorization,'Bearer test');
   if(action==='session')return json({owner:true});
   if(action==='list')return json({items:[...manifests].map(([id,m])=>({id,savedAt:m.createdAt})),cursor:null});
+  if(action==='shared-status'){const b=parts.get('shared/'+u.searchParams.get('hash'));return json(b?{exists:true,hash:u.searchParams.get('hash'),size:b.length}:{exists:false});}
+  if(action==='shared-put'){const b=JSON.parse(opts.body);parts.set('shared/'+b.hash,Buffer.from(b.data,'base64'));return json({saved:true});}
+  if(action==='shared-get')return new Response(corrupt?Buffer.from('broken'):parts.get('shared/'+u.searchParams.get('hash')));
   if(action==='part'){
    if(opts.method==='POST'){parts.set(id+'/'+part,Buffer.from(JSON.parse(opts.body).data,'base64'));return json({saved:true});}
    return new Response(corrupt?Buffer.from('broken'):parts.get(id+'/'+part));

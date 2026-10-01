@@ -32,7 +32,7 @@ test('rejects path traversal and malformed part IDs',()=>{
 test('all private API actions reject unauthenticated calls', async()=>{
   process.env.SUPABASE_URL=cfg.url;process.env.SUPABASE_PUBLISHABLE_KEY=cfg.key;process.env.APP_OWNER_USER_ID=cfg.owner;
   const handler=require('../api/cloud');
-  for(const action of ['sync-part-status','sync-index-info','sync-index-page','sync-index-chunk','sync-index-finalize','index-info','index-page','index-chunk','index-finalize','session','list','part-status','part','commit','browse','remove-record','cleanup','delete-snapshot','sync-index','sync-part','sync-cleanup','trash-restore','trash-purge','storage-usage']) {
+  for(const action of ['shared-status','shared-get','shared-promote','shared-put','sync-part-status','sync-index-info','sync-index-page','sync-index-chunk','sync-index-finalize','index-info','index-page','index-chunk','index-finalize','session','list','part-status','part','commit','browse','remove-record','cleanup','delete-snapshot','sync-index','sync-part','sync-cleanup','trash-restore','trash-purge','storage-usage']) {
     let status, body; const headers={};
     const res={setHeader:(k,v)=>headers[k]=v,status:s=>{status=s;return res;},json:v=>{body=v;return res;}};
     await handler({headers:{},method:'GET',query:{action}},res);
