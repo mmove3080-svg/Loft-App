@@ -10,6 +10,7 @@ async function create(db,records,id){
 }
 async function run(db,io){
  let job=await read(db,KEY);if(!job)return;
+ const check=()=>{if(io.check)io.check();};
  const checkpoint=()=>transaction(db,s=>s.put(job,KEY));
  const notify=()=>io.progress({...job,encoded:undefined,blobs:undefined});
  try{
@@ -19,14 +20,15 @@ async function run(db,io){
    const upgraded={...job,encodedRows:true,encoded:[]};
    await transaction(db,s=>{old.forEach((value,i)=>s.put(value,ENCODED+i));s.put(upgraded,KEY);});job=upgraded;
   }
-  job.state='saving';job.error=null;await checkpoint();notify();
+  check();job.state='saving';job.error=null;await checkpoint();notify();
   for(;job.index<job.total;){
+   check();
    const r=await read(db,ROW+job.index);if(!r)throw new Error('Snapshot source is missing. Saved progress has been preserved.');
    let ordinal=0;
    const value=await io.encode(r.value,async blob=>{
     const n=ordinal++;const info=job.blobs[n]||(job.blobs[n]={type:blob.type,size:blob.size,parts:[]});
     for(let offset=info.parts.length*1048576;offset<blob.size;offset+=1048576){
-     if(!io.online())throw new Error('Offline. Resuming automatically when connected.');
+     check();if(!io.online())throw new Error('Offline. Resuming automatically when connected.');
      const slice=blob.slice(offset,offset+1048576);
      if(job.part>=1000000)throw new Error('Snapshot has too many upload parts.');
      // Persist intent before sending. After a lost response, HEAD verifies the
@@ -40,7 +42,7 @@ async function run(db,io){
       // Old pending parts remain recoverable. Only unfinished work changes storage.
       p.shared=true;await checkpoint();exists=await io.reuse(p);
      }
-     if(!exists){await io.upload(job.id,p,slice);job.transferred=(job.transferred||0)+p.size;}
+     check();if(!exists){await io.upload(job.id,p,slice);job.transferred=(job.transferred||0)+p.size;}
      else job.reused=(job.reused||0)+p.size;
      info.parts.push({number:p.number,hash:p.hash,...(p.shared?{shared:true}:{})});job.part++;job.uploaded+=p.size;job.pending=null;
      await checkpoint();notify();
@@ -56,7 +58,7 @@ async function run(db,io){
   const records=[];for(let i=0;i<job.index;i++){const record=await read(db,ENCODED+i);if(!record)throw new Error('Completed snapshot metadata is missing. Existing media was preserved.');records.push(record);}
   const manifest={version:1,createdAt:job.createdAt,parts:job.part,records};
   job.state='finalizing';await checkpoint();notify();
-  await io.commit(job.id,manifest);
+  check();await io.commit(job.id,manifest);
   job.state='complete';await transaction(db,s=>{s.put({...job,encoded:[],blobs:[]},'snapshot-last-v2');s.delete(KEY);s.delete('snapshot-session-v2');for(let i=0;i<job.total;i++)s.delete(ENCODED+i);});notify();return job;
  }catch(e){job.state='paused';job.error=e.message;try{await checkpoint();}catch{}notify();throw e;}
 }

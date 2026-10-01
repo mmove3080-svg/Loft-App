@@ -5,7 +5,7 @@ const assert=require('node:assert/strict');
 const {webcrypto}=require('node:crypto');
 (async()=>{
  const dom=new JSDOM('<main></main>',{url:'https://loft.test',runScripts:'outside-only'}), w=dom.window;
- w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;w.URL.createObjectURL=()=> 'blob:test';w.URL.revokeObjectURL=()=>{};
+ w.Response=Response;w.Blob=Blob;w.AbortSignal=AbortSignal;Object.defineProperty(w,'crypto',{value:webcrypto});w.confirm=()=>true;w.URL.createObjectURL=()=> 'blob:test';w.URL.revokeObjectURL=()=>{};
  const manifests=new Map(), parts=new Map();let corrupt=false;
  w.fetch=async(url,opts={})=>{
   const u=new URL(url,'https://loft.test'),action=u.searchParams.get('action'),id=u.searchParams.get('id'),part=u.searchParams.get('part');
