@@ -103,7 +103,29 @@
     if(db&&await dbRead(db,'snapshot-job-v2'))await window.LoftSnapshotJob.transaction(db,s=>s.put(session,'snapshot-session-v2'));
   }
   function snapshotProgress(state){snapshotState=state;window.dispatchEvent(new Event('loft-snapshot-status'));}
-  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
+  function snapshotMessage(s){return (s.state==='complete'?'Saved '+s.total+' records':s.state==='paused'?'Snapshot paused':s.state==='finalizing'?'Finalizing snapshot index':s.state==='preparing'?'Checking existing backups':'Saving snapshot')+' · '+s.index+'/'+s.total+' completed · '+(s.uploaded/1048576).toFixed(1)+' MB checked · Uploaded this snapshot: '+((s.transferred||0)/1048576).toFixed(1)+' MB · Reused: '+((s.reused||0)/1048576).toFixed(1)+' MB · Last saved: '+s.last+(s.error?' · '+s.error:'');}
+  async function snapshotCatalog(progress){
+    const catalog=new Map();let cursor;
+    const visit=(value,id)=>{
+      if(!Array.isArray(value))throw new Error('Invalid backup metadata.');
+      const [tag,data]=value;
+      if(tag==='blob'){
+        for(let i=0;i<data.parts.length;i++){const p=data.parts[i];if(!p.shared&&!catalog.has(p.hash))catalog.set(p.hash,{id,part:p.number,size:Math.min(1048576,data.size-i*1048576)});}
+      }else if(tag==='object')for(const pair of data)visit(pair[1],id);
+      else if(tag==='array')for(const v of data)visit(v,id);
+    };
+    do{
+      const page=await(await request('list',cursor?{cursor}:{})).json();
+      for(const item of page.items){
+        if(progress)progress('Checking saved backup metadata for reusable media…');
+        try{const {manifest}=await window.LoftSnapshotTransfer.read(item.id,request);if(!manifest.deleting)for(const r of manifest.records)visit(r.value,item.id);}
+        catch(e){if(e.status!==404)throw e;}
+      }
+      cursor=page.cursor;
+    }while(cursor);
+    return catalog;
+  }
+  async function snapshotPart(id,p){return request(p.shared?'shared-get':'part',p.shared?{hash:p.hash}:{id,part:String(p.number)});}
   async function save(bridge, progress, createNew=true){
     if(auto.running)await setAuto(false);
     const db=await bridge.openDB(),engine=window.LoftSnapshotJob;
@@ -116,11 +138,19 @@
         if(!job&&createNew){job=await engine.create(db,await readLocal(bridge),uuid());if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{});}
         if(!job)return;
         await rememberSnapshotSession();
+        snapshotProgress({...job,state:'preparing'});
+        const catalog=job.index<job.total?await snapshotCatalog(progress):new Map();
         await engine.run(db,{
           encode,hash,online:()=>navigator.onLine!==false,
           progress:s=>{snapshotProgress(s);if(progress)progress(snapshotMessage(s));},
-          exists:async(id,p)=>{const r=await(await request('part-status',{id,part:String(p.number)})).json();if(r.exists&&(r.hash!==p.hash||r.size!==p.size))throw new Error('Saved upload part does not match.');return r.exists;},
-          upload:async(id,p,blob)=>request('part',{id,part:String(p.number)},{data:base64(new Uint8Array(await blob.arrayBuffer()))}),
+          exists:async(id,p)=>{const r=await(await request(p.shared?'shared-status':'part-status',p.shared?{hash:p.hash}:{id,part:String(p.number)})).json();if(r.exists&&(r.hash!==p.hash||r.size!==p.size))throw new Error('Saved upload part does not match.');return r.exists;},
+          reuse:async p=>{
+            const state=await(await request('shared-status',{hash:p.hash})).json();
+            if(state.exists){if(state.size!==p.size)throw new Error('Saved media size does not match.');return true;}
+            const old=catalog.get(p.hash);if(!old||old.size!==p.size)return false;
+            return (await(await request('shared-promote',{}, {hash:p.hash,...old})).json()).saved;
+          },
+          upload:async(id,p,blob)=>request(p.shared?'shared-put':'part',p.shared?{}:{id,part:String(p.number)},{...(p.shared?{hash:p.hash}:{}),data:base64(new Uint8Array(await blob.arrayBuffer()))}),
           commit:(id,manifest)=>window.LoftSnapshotTransfer.commit(id,manifest,{request,hash})
         });
       }finally{snapshotRunning=false;window.dispatchEvent(new Event('loft-snapshot-status'));}
@@ -163,7 +193,7 @@
         if (!info || !Array.isArray(info.parts) || !Number.isSafeInteger(info.size) || info.size < 0) throw new Error('Invalid media information.');
         const chunks = [];
         for (const p of info.parts) {
-          const blob = await (await request('part', {id, part: String(p.number)})).blob();
+          const blob = await (await snapshotPart(id,p)).blob();
           if (await hash(blob) !== p.hash) throw new Error('Media integrity check failed. No records were imported.');
           chunks.push(blob);
         }
@@ -393,7 +423,7 @@
     async function mediaBlob(id,info){
       const chunks=[];
       if(!info||!Array.isArray(info.parts)||!Number.isSafeInteger(info.size)||info.size<0)throw new Error('Invalid media information.');
-      for(const p of info.parts){const b=await (await request('part',{id,part:String(p.number)})).blob();if(await hash(b)!==p.hash)throw new Error('Media integrity check failed.');chunks.push(b);}
+      for(const p of info.parts){const b=await (await snapshotPart(id,p)).blob();if(await hash(b)!==p.hash)throw new Error('Media integrity check failed.');chunks.push(b);}
       const b=new Blob(chunks,{type:info.type});if(b.size!==info.size)throw new Error('Incomplete media.');return b;
     }
     const bytesLabel=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(2)+' GB';
@@ -436,7 +466,7 @@
       const manifest=item.sync?{records:active.map(e=>({store:e.store,value:e.value})),createdAt:Date.now()}:data.manifest,revision=data.revision;
       snapshots.append(node('h3',item.trash?'Trash · 30-day recovery':item.sync?'Your cloud collection':'Saved backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
       if(manifest.deleting){snapshots.append(node('p','This backup is being deleted.'));button('Resume deleting backup',()=>deleteBackup(item),snapshots);return;}
-      snapshots.append(node('p',item.trash?'Restore items before their recovery deadline. Expired items are removed during scheduled cleanup. Older backups are separate.':item.sync?'Search and browse your synced photos, videos, notes, contacts and conversations. Deleted synced items go to Trash.':'Browsing does not import anything. Backup deletions are permanent and affect this backup only.'));
+      snapshots.append(node('p',item.trash?'Restore items before their recovery deadline. Expired items are removed during scheduled cleanup. Older backups are separate.':item.sync?'Search and browse your synced photos, videos, notes, contacts and conversations. Deleted synced items go to Trash.':'Browsing does not import anything. Backup deletions are permanent and affect this backup only. Shared media is retained to protect other backups.'));
       const toolbar=node('div');toolbar.className='library-toolbar';
       const search=node('input');search.type='search';search.placeholder='Search names, notes, numbers and messages';search.setAttribute('aria-label','Search cloud library');
       const filter=node('select');filter.setAttribute('aria-label','Filter cloud items');

@@ -16,6 +16,11 @@ module.exports = async function handler(req, res) {
     if (action === 'session' && req.method === 'GET') return res.status(200).json({owner: true});
     const {s3, Bucket} = storage();
     const prefix = 'loft-private/v1/' + uid + '/';
+    if(['shared-status','shared-get','shared-promote','shared-put'].includes(action)){
+      const value=await require('../lib/shared-media').sharedMedia({s3,Bucket,prefix,action,method:req.method,query:req.query,body:req.body});
+      if(Buffer.isBuffer(value)){res.setHeader('Content-Type','application/octet-stream');return res.status(200).send(value);}
+      return res.status(200).json(value);
+    }
     if(action==='storage-usage'&&req.method==='GET'){
       const cursor=req.query.cursor;
       if(cursor&&(typeof cursor!=='string'||cursor.length>4096))throw new HttpError(400,'Invalid cursor.');
@@ -24,7 +29,7 @@ module.exports = async function handler(req, res) {
       for(const file of page.Contents||[]){
         if(!file.Key.startsWith(prefix))throw new HttpError(503,'Unexpected storage response.');
         const path=file.Key.slice(prefix.length);
-        totals[path.startsWith('sync/')?'sync':/^(parts|commits)\//.test(path)?'backups':'other']+=file.Size||0;totals.objects++;
+        totals[path.startsWith('sync/')?'sync':/^(parts|commits|shared-media)\//.test(path)?'backups':'other']+=file.Size||0;totals.objects++;
       }
       return res.status(200).json({totals,cursor:page.NextContinuationToken||null});
     }
