@@ -32,3 +32,7 @@
 .cloud .scroll{background:var(--pg);color:var(--ink)}
 .cloud{background:var(--pg);color:var(--ink)}
 @media(prefers-reduced-motion:reduce){.cloud-panel button{transition:none}}
+
+.recovery-countdown{position:absolute;bottom:6px;left:4px;right:4px;z-index:2;padding:3px;border-radius:4px;background:#000b;color:#fff;font-size:12px;text-align:center;pointer-events:none}
+
+.recovery-tools{flex-wrap:wrap;align-items:center}.recovery-tools p{flex-basis:100%;margin:0;font-size:13px;line-height:1.4}.recovery-tools button{min-height:44px;padding:8px 10px;border:1px solid var(--line,#8886);border-radius:10px}.photo-tools.album-tools select{max-width:none;flex:1;min-width:0}

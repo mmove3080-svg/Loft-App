@@ -1044,7 +1044,7 @@ var SCREEN='article'; // 'article' | 'lock' | 'home'
 
 /* ------------------------------- boot ------------------------------------ */
 var mediaStore=window.LoftMedia.create(openDB);
-async function refreshHomeMedia(){try{var list=await mediaStore.scan(8);var records=await Promise.all(list.map(function(m){return mediaStore.get(m.id)}));renderPhotosWidget(records.filter(Boolean));}catch(e){renderPhotosWidget(null);}}
+async function refreshHomeMedia(){try{await mediaStore.expire();var list=await mediaStore.scan(8);var records=await Promise.all(list.map(function(m){return mediaStore.get(m.id)}));renderPhotosWidget(records.filter(Boolean));}catch(e){renderPhotosWidget(null);}}
 layout(); buildCalendar(); startClock(); renderPhotosWidget(null);refreshHomeMedia();
 setInterval(buildCalendar,60*60*1000);
 

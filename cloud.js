@@ -302,12 +302,14 @@
   }
   async function syncRead(){
     const db=await auto.bridge.openDB();if(!db)throw new Error('Local database unavailable. Sync paused.');
+    if(window.LoftMedia?.expire)await window.LoftMedia.expire(db);
     return new Promise((resolve,reject)=>{
-      const tx=db.transaction([...stores,'kv'],'readonly'),records=[],state={base:{}};let revision=0;
+      const tx=db.transaction([...stores,'kv'],'readonly'),records=[],state={base:{},purged:[]};
+      const purge=tx.objectStore('kv').openCursor();purge.onsuccess=()=>{const c=purge.result;if(c){if(String(c.key).startsWith('media-purge-v1:'))state.purged.push(c.value.id);c.continue();}};let revision=0;
       for(const store of stores){const r=tx.objectStore(store).openCursor();r.onsuccess=()=>{const c=r.result;if(c){records.push({store,value:c.value});c.continue();}};}
       const rev=tx.objectStore('kv').get('sync-local-revision');rev.onsuccess=()=>{revision=rev.result||0;};
       const b=tx.objectStore('kv').get('sync-base-v1');b.onsuccess=()=>{state.base=b.result||{};};
-      tx.oncomplete=()=>resolve({db,records,revision,base:state.base});tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not read sync state.'));
+      tx.oncomplete=()=>resolve({db,records,revision,base:state.base,purged:state.purged});tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Could not read sync state.'));
     });
   }
   async function syncMedia(entry,info,signal){
@@ -330,6 +332,7 @@
     const local=await syncRead();let entries;
     if(auto.cacheRevision===local.revision&&auto.cacheDB===local.db)entries=auto.cacheEntries;
     else{entries=[];for(const r of local.records){checkSync(signal);syncStatus('Checking '+(entries.length+1)+'/'+local.records.length+' · '+(r.value.name||r.store));await new Promise(resolve=>setTimeout(resolve,0));entries.push({store:r.store,id:r.value.id,value:r.value,deleted:false,hash:await hash(new Blob([await fingerprint(r.value)]))});}auto.cacheRevision=local.revision;auto.cacheDB=local.db;auto.cacheEntries=entries;}
+    entries=entries.concat(local.purged.filter(id=>!entries.some(e=>e.store==='media'&&e.id===id)).map(id=>({store:'media',id,deleted:true,permanent:true})));
     checkSync(signal);syncStatus('Reading shared collection…');
     const remote=await window.LoftSnapshotTransfer.readSync((...args)=>syncRequest(signal,...args));
     const plan=engine.plan(entries,remote.entries,local.base,auto.choices);
@@ -353,7 +356,7 @@
       const next=new Map(remote.entries.map(e=>[engine.keyOf(e),e]));
       for(const e of plan.push){
         checkSync(signal);syncStatus("Sending "+(++sent)+"/"+plan.push.length+" · "+(e.value?.name||e.store));
-        if(e.deleted){next.set(engine.keyOf(e),{store:e.store,id:e.id,deleted:true});continue;}
+        if(e.deleted){next.set(engine.keyOf(e),{store:e.store,id:e.id,deleted:true,...(e.permanent?{permanent:true}:{})});continue;}
         const previous=next.get(engine.keyOf(e)),reuse=await reuseEncoding(e.value,previous);
         if(reuse){next.set(engine.keyOf(e),{store:e.store,id:e.id,hash:e.hash,deleted:false,source:previous.source,value:reuse});continue;}
         const checkpointKey='sync-upload-v2:'+engine.keyOf(e);
@@ -386,8 +389,9 @@
       const tx=local.db.transaction([...stores,'kv'],'readwrite'),kv=tx.objectStore('kv'),r=kv.get('sync-local-revision');
       r.onsuccess=()=>{
         if(signal.aborted||(r.result||0)!==local.revision||!auto.bridge.canSync()||!auto.enabled||!session){tx.abort();return;}
-        for(const e of updates){const store=tx.objectStore(e.store);if(e.deleted)store.delete(e.id);else store.put(e.value);}
+        for(const e of updates){const store=tx.objectStore(e.store);if(e.deleted)store.delete(e.id);else {store.put(e.value);if(e.store==='media')kv.delete('media-purge-v1:'+e.id);}}
         for(const e of entries)kv.delete('sync-upload-v2:'+engine.keyOf(e));
+        for(const id of local.purged)kv.delete('media-purge-v1:'+id);
         kv.put(plan.base,'sync-base-v1');kv.put(local.revision+(updates.length?1:0),'sync-local-revision');kv.put(Date.now(),'sync-last-success');
       };
       tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Local data changed during sync. It will retry.'));
@@ -514,7 +518,7 @@
       const viewId=++libraryView;
       clearPreviews();snapshots.textContent='';progress('Loading library…');
       const data=item.sync?await window.LoftSnapshotTransfer.readSync(request):await window.LoftSnapshotTransfer.read(item.id,request);
-      const active=item.sync?(item.trash?data.trash||[]:data.entries.filter(e=>!e.deleted)):null;
+      const active=item.sync?(item.trash?[...(data.trash||[]),...data.entries.filter(e=>!e.deleted&&e.recycle).map(e=>({...e,...e.recycle}))]:data.entries.filter(e=>!e.deleted&&!e.recycle)):null;
       const manifest=item.sync?{records:active.map(e=>({store:e.store,value:e.value})),createdAt:Date.now()}:data.manifest,revision=data.revision;
       snapshots.append(node('h3',item.trash?'Trash · 30-day recovery':item.sync?'Your cloud collection':'Saved backup · '+new Date(manifest.createdAt||item.savedAt).toLocaleString()));
       if(manifest.deleting){snapshots.append(node('p','This backup is being deleted.'));button('Resume deleting backup',()=>deleteBackup(item),snapshots);return;}
@@ -590,12 +594,19 @@
           if(item.trash){
             const entry=active[index],remaining=Math.max(0,Math.ceil((entry.expiresAt-(data.serverTime||Date.now()))/86400000));
             card.append(node('p',remaining?'Recoverable for '+remaining+' more day'+(remaining===1?'':'s')+' · until '+new Date(entry.expiresAt).toLocaleString():'Recovery expired · awaiting cleanup'));
-            if(remaining)button('Restore item',async()=>{await request('trash-restore',{}, {revision,store:entry.store,id:entry.id});await browse(item);progress('Restored to your cloud collection. Enabled devices receive it on their next sync.');setTimeout(()=>tick(true).catch(()=>{}),0);},card);
+            if(remaining)button('Restore item',async()=>{let restored;
+              if(entry.recycle){const value=await decode(entry.value,info=>syncMedia(entry,info));delete value.loftDeletedAt;restored={value:await reuseEncoding(value,entry),hash:await hash(new Blob([await fingerprint(value)]))};}
+              await request('trash-restore',{}, {revision,store:entry.store,id:entry.id,...(restored?{restored}:{})});await browse(item);progress('Restored to your cloud collection. Enabled devices receive it on their next sync.');setTimeout(()=>tick(true).catch(()=>{}),0);},card);
             button('Delete permanently',async()=>{if(!confirm('Permanently remove this item from Trash now? Older backups may still hold separate copies.'))return;await request('trash-purge',{}, {revision,store:entry.store,id:entry.id});await request('sync-cleanup',{},{}).catch(()=>{});await browse(item);progress('Removed from Trash. Remaining media cleanup will resume automatically.');},card);
           }else if(store!=='albums')button(item.sync?'Move to Trash':'Delete item from this backup',async()=>{
             if(item.sync){
               if(!confirm('Move this item to Trash? Enabled devices receive the deletion on their next sync. You can restore it for 30 days.'))return;
-              const entry=active[index];await window.LoftSnapshotTransfer.commitSync({revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?{store:e.store,id:e.id,deleted:true}:e)},{request,hash});
+              const entry=active[index];let removed={store:entry.store,id:entry.id,deleted:true};
+              if(entry.store==='media'){
+                const value=await decode(entry.value,info=>syncMedia(entry,info));value.loftDeletedAt=Date.now();
+                removed={...entry,value:await reuseEncoding(value,entry),hash:await hash(new Blob([await fingerprint(value)]))};
+              }
+              await window.LoftSnapshotTransfer.commitSync({revision,entries:data.entries.map(e=>e.store===entry.store&&e.id===entry.id?removed:e)},{request,hash});
               await browse(item);progress('Moved to Trash for 30 days.');setTimeout(()=>tick(true).catch(()=>{}),0);return;
             }
             if(!confirm('Permanently delete this item from THIS backup? Other backups and device copies remain.'))return;
